@@ -1,0 +1,25 @@
+# Data and model artifacts
+/data/*
+!/data/.gitkeep
+/models/*
+!/models/.gitkeep
+*.pt
+*.pth
+*.h5
+*.onnx
+*.zip
+*.csv
+*.parquet
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
