@@ -1,12 +1,20 @@
-# Data and model artifacts
+# Data, model, and experiment artifacts
 /data/*
 !/data/.gitkeep
 /models/*
 !/models/.gitkeep
+/outputs/
+face_bmi_pipeline.out
+run_face_bmi_pipeline.py
+chatgpt_pro_master_prompt.txt
 *.pt
 *.pth
 *.h5
 *.onnx
+*.joblib
+*.pkl
+*.npy
+*.npz
 *.zip
 *.csv
 *.parquet

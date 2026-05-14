@@ -6,6 +6,14 @@ Course project for ML2, Spring 2026. This repository will replicate and extend *
 
 Build a real-time BMI prediction system from a face image using transfer learning, then expose it through a simple web API or demo interface. The target is to match or beat the paper's reported performance.
 
+See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full technical plan.
+
+Fast-start Colab notebook:
+
+- [`notebooks/facefinalml2_colab_runner.ipynb`](notebooks/facefinalml2_colab_runner.ipynb)
+
+The Colab notebook is intentionally a single-cell runner: it clones/pulls this repo, downloads the Google Drive BMI zip, audits the data, creates leakage-free splits, extracts frozen FaceNet/VGGFace2 + ConvNeXt + optional DINOv2 embeddings, trains regularized regressors, evaluates an ensemble, and writes metrics under `outputs/metrics/`.
+
 ## Reference paper baseline
 
 The paper reports Pearson correlation on the test set for BMI prediction:

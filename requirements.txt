@@ -3,10 +3,17 @@ torchvision
 torchaudio
 numpy
 pandas
+scipy
 scikit-learn
+xgboost
+joblib
 pillow
 tqdm
 opencv-python-headless
+facenet-pytorch
+timm
+transformers
+accelerate
 mediapipe
 fastapi
 uvicorn[standard]
