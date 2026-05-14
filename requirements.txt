@@ -21,5 +21,6 @@ python-multipart
 streamlit
 requests
 gdown
+google-api-python-client
 matplotlib
 seaborn
