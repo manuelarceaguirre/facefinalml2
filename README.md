@@ -6,7 +6,12 @@ Course project for ML2, Spring 2026. This repository will replicate and extend *
 
 Build a real-time BMI prediction system from a face image using transfer learning, then expose it through a simple web API or demo interface. The target is to match or beat the paper's reported performance.
 
+Project page / technical blog:
+
+- https://manuelarceaguirre.github.io/facefinalml2/
+
 See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full technical plan.
+See [`RESULTS.md`](RESULTS.md) and [`HANDOFF.md`](HANDOFF.md) for final metrics and handoff notes.
 
 Fast-start Colab notebook:
 
