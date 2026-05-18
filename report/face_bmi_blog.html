@@ -4,26 +4,26 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Face-to-BMI Replication: Beating the Paper with Pair-Safe Modern Embeddings</title>
-  <meta name="description" content="Technical blog for a Face-to-BMI replication and extension using pair-safe evaluation, ArcFace, DINOv2, ConvNeXt, and validation-selected ensembles." />
+  <meta name="description" content="Prose-first technical blog for a Face-to-BMI replication and extension." />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
       --paper:#fffdf7; --surround:#efede7; --ink:#111; --muted:#69635a;
-      --hairline:#d8d0c4; --rule:#1b1b1b; --accent:#244c8f; --warn:#9f1d20;
+      --hairline:#d8d0c4; --rule:#1b1b1b;
       --font-serif:"Crimson Pro", Georgia, serif;
       --font-mono:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      --max:1180px;
+      --max:1120px;
     }
     * { box-sizing:border-box; }
     html { scroll-behavior:smooth; }
-    body { margin:0; background:var(--surround); color:var(--ink); font-family:var(--font-serif); font-size:18px; line-height:1.56; }
-    code, pre, .mono, nav, .toc, .kicker, th, .metric-label, .tag { font-family:var(--font-mono); }
-    code { font-size:.86em; background:rgba(36,76,143,.07); border:1px solid rgba(36,76,143,.14); padding:1px 4px; border-radius:2px; }
-    pre { margin:18px 0 26px; padding:16px 18px; overflow:auto; background:#f6f0e6; border:1px solid var(--hairline); font-size:13px; line-height:1.45; }
+    body { margin:0; background:var(--surround); color:var(--ink); font-family:var(--font-serif); font-size:19px; line-height:1.62; }
+    code, pre, .mono, nav, .toc, .kicker, th { font-family:var(--font-mono); }
+    code { font-size:.86em; background:rgba(0,0,0,.045); border:1px solid var(--hairline); padding:1px 4px; border-radius:2px; }
+    pre { margin:18px 0 28px; padding:16px 18px; overflow:auto; background:#f6f0e6; border:1px solid var(--hairline); font-size:13px; line-height:1.45; }
     pre code { background:transparent; border:0; padding:0; }
-    .topbar { position:sticky; top:0; z-index:20; background:rgba(255,253,247,.94); border-bottom:1px solid var(--rule); backdrop-filter:blur(6px); }
+    .topbar { position:sticky; top:0; z-index:20; background:rgba(255,253,247,.95); border-bottom:1px solid var(--rule); backdrop-filter:blur(6px); }
     .topbar-inner { width:min(var(--max), calc(100% - 32px)); margin:0 auto; min-height:58px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
     .brand, .nav-links { font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; }
     .brand { font-weight:600; }
@@ -31,51 +31,33 @@
     .nav-links a { color:inherit; text-decoration:none; }
     .progress-line { height:2px; background:var(--hairline); }
     .progress-line span { display:block; height:100%; width:0; background:var(--ink); }
-    .layout { width:min(var(--max), calc(100% - 32px)); margin:0 auto; display:grid; grid-template-columns:230px minmax(0,1fr); gap:42px; padding:44px 0 72px; }
+    .layout { width:min(var(--max), calc(100% - 32px)); margin:0 auto; display:grid; grid-template-columns:220px minmax(0,1fr); gap:44px; padding:44px 0 72px; }
     .toc-wrap { position:sticky; top:88px; align-self:start; max-height:calc(100vh - 110px); overflow:auto; }
     .toc-title { font-family:var(--font-mono); font-size:12px; letter-spacing:.06em; margin-bottom:12px; }
     .readout { color:var(--muted); font-family:var(--font-mono); font-size:12px; margin-bottom:20px; }
     .toc { list-style:none; margin:0; padding:0; border-left:1px solid var(--hairline); }
     .toc a { display:block; padding:5px 0 5px 14px; margin-left:-1px; border-left:1px solid transparent; color:var(--muted); text-decoration:none; font-size:12px; line-height:1.35; }
     .toc a:hover, .toc a.active { color:var(--ink); border-left-color:var(--ink); }
-    article { background:var(--paper); border:1px solid var(--rule); padding:clamp(28px,5vw,58px); }
+    article { background:var(--paper); border:1px solid var(--rule); padding:clamp(30px,5vw,62px); }
     .hero { border-bottom:1px solid var(--rule); padding-bottom:32px; margin-bottom:36px; }
     .kicker { color:var(--muted); font-size:11px; letter-spacing:.08em; text-transform:uppercase; margin-bottom:12px; }
     h1 { font-size:clamp(42px,7vw,78px); line-height:.94; letter-spacing:-.045em; margin:0 0 20px; font-weight:700; }
-    .subtitle { font-size:clamp(21px,3vw,30px); line-height:1.18; max-width:860px; margin:0 0 22px; }
+    .subtitle { font-size:clamp(21px,3vw,30px); line-height:1.2; max-width:850px; margin:0 0 22px; }
     .byline { display:flex; flex-wrap:wrap; gap:10px 18px; color:var(--muted); font-family:var(--font-mono); font-size:12px; }
     h2 { font-size:clamp(31px,4vw,48px); line-height:1.02; letter-spacing:-.03em; margin:58px 0 18px; border-top:1px solid var(--rule); padding-top:30px; }
-    h3 { font-size:25px; line-height:1.1; margin:32px 0 12px; }
-    p { margin:0 0 18px; }
-    .lead { font-size:22px; line-height:1.38; }
-    .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:24px 0 28px; }
-    .metric { border:1px solid var(--rule); padding:15px 16px 14px; background:#fffaf0; min-height:112px; }
-    .metric-label { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:8px; }
-    .metric-value { font-size:35px; line-height:1; letter-spacing:-.035em; font-weight:700; }
-    .metric-note { margin-top:8px; color:var(--muted); font-size:14px; line-height:1.25; }
-    table { width:100%; border-collapse:collapse; margin:18px 0 28px; font-size:15px; }
+    h3 { font-size:25px; line-height:1.1; margin:36px 0 12px; }
+    p { margin:0 0 19px; }
+    .lead { font-size:22px; line-height:1.42; }
+    ul { margin:0 0 20px 24px; padding:0; }
+    li { margin:6px 0; }
+    table { width:100%; border-collapse:collapse; margin:18px 0 34px; font-size:15px; }
     th, td { border-bottom:1px solid var(--hairline); padding:9px 8px; text-align:left; vertical-align:top; }
     th { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); font-weight:500; }
     .num { text-align:right; font-variant-numeric:tabular-nums; }
-    .note { border-left:2px solid var(--ink); padding:12px 18px; margin:22px 0; background:rgba(36,76,143,.055); }
-    .warning { border-left-color:var(--warn); background:rgba(159,29,32,.055); }
-    .figure { margin:26px 0 32px; border:1px solid var(--rule); background:#fffaf0; padding:18px; }
-    .figure-title { display:flex; justify-content:space-between; gap:16px; border-bottom:1px solid var(--hairline); padding-bottom:10px; margin-bottom:16px; }
-    .tag { display:inline-block; border:1px solid var(--hairline); color:var(--muted); font-size:10px; letter-spacing:.06em; text-transform:uppercase; padding:2px 6px; }
-    .flow { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; }
-    .flow-step { border:1px solid var(--hairline); background:var(--paper); padding:12px; min-height:130px; position:relative; }
-    .flow-step:not(:last-child)::after { content:""; position:absolute; right:-8px; top:50%; width:13px; height:1px; background:var(--ink); }
-    .flow-step h4 { font-size:17px; margin:8px 0 6px; line-height:1.1; }
-    .flow-step p { margin:0; color:var(--muted); font-size:14px; line-height:1.3; }
-    .caption { margin:12px 0 0; padding-top:10px; border-top:1px solid var(--hairline); color:var(--muted); font-size:14px; line-height:1.35; }
-    .two-col { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:18px 0 26px; }
-    .mini-card { border:1px solid var(--hairline); background:#fffaf0; padding:16px; }
-    .mini-card h4 { margin:4px 0 8px; font-size:19px; }
-    .mini-card p, .mini-card li { color:var(--muted); font-size:15px; line-height:1.35; }
-    ul { margin:0 0 18px 24px; padding:0; }
+    .tables-only { border-top:1px solid var(--rule); margin-top:58px; padding-top:30px; }
     .footer-note { border-top:1px solid var(--rule); margin-top:56px; padding-top:20px; color:var(--muted); font-size:15px; }
-    @media (max-width:980px) { .layout{grid-template-columns:1fr;} .toc-wrap{position:static;} .toc{columns:2;} .metric-grid{grid-template-columns:repeat(2,1fr);} .flow{grid-template-columns:1fr;} .flow-step::after{display:none;} }
-    @media (max-width:640px) { body{font-size:16px;} .nav-links{display:none;} article{padding:24px 18px;} .metric-grid,.two-col{grid-template-columns:1fr;} .toc{columns:1;} table{font-size:13px;} }
+    @media (max-width:980px) { .layout{grid-template-columns:1fr;} .toc-wrap{position:static;} .toc{columns:2;} }
+    @media (max-width:640px) { body{font-size:16px;} .nav-links{display:none;} article{padding:24px 18px;} .toc{columns:1;} table{font-size:13px;} }
   </style>
 </head>
 <body>
@@ -102,6 +84,7 @@
         <li><a href="#results">Results</a></li>
         <li><a href="#demo">Demo/API</a></li>
         <li><a href="#limitations">Limitations</a></li>
+        <li><a href="#tables">Tables</a></li>
       </ol>
     </aside>
 
@@ -109,22 +92,104 @@
       <section class="hero">
         <div class="kicker">Machine Learning II final project · replication and extension</div>
         <h1>Beating Face-to-BMI with Pair-Safe Modern Embeddings</h1>
-        <p class="subtitle">A replication of the Face-to-BMI paper that starts from the original evaluation target, repairs a leakage risk in the provided dataset, and then improves the result using modern face and vision embeddings.</p>
+        <p class="subtitle">A prose-first account of how I replicated the Face-to-BMI paper, made the evaluation leakage-safe, and improved the reported score with modern frozen embeddings.</p>
         <div class="byline"><span>Manuel Arce Aguirre</span><span>UChicago ML2 · Spring 2026</span><span>Final pair-safe test r = 0.7216</span></div>
       </section>
 
-      <div class="metric-grid">
-        <div class="metric"><div class="metric-label">Paper target</div><div class="metric-value">0.650</div><div class="metric-note">VGG-Face + SVR overall Pearson r</div></div>
-        <div class="metric"><div class="metric-label">Best single model</div><div class="metric-value">0.710</div><div class="metric-note">ArcFace + DINOv2 + ConvNeXt RidgeCV</div></div>
-        <div class="metric"><div class="metric-label">Best ensemble</div><div class="metric-value">0.722</div><div class="metric-note">Validation-selected ensemble</div></div>
-        <div class="metric"><div class="metric-label">Pair overlap</div><div class="metric-value">0</div><div class="metric-note">Train/val/test group overlap</div></div>
-      </div>
-
       <section id="original-paper">
         <h2>Original Paper</h2>
-        <p class="lead">The original Face-to-BMI paper asked a simple computer vision question: can a model infer body mass index from a face image?</p>
-        <p>Kocabey et al. collected a dataset of social media face images with BMI labels and treated BMI prediction as a supervised regression problem. Their strongest pipeline did not train a new deep network end-to-end. Instead, it used a pretrained CNN as a feature extractor, took high-level face/image features, and trained a support vector regressor on top. The two main feature backbones were generic VGG-Net and face-specialized VGG-Face.</p>
-        <p>The important part for this project is the evaluation. The paper reported performance using Pearson correlation between true BMI and predicted BMI on a held-out test set. Their headline result was:</p>
+        <p class="lead">The original Face-to-BMI paper asked whether a computer vision model could infer a person's body mass index from a face image.</p>
+        <p>Kocabey et al. framed the problem as supervised regression. They collected face images with BMI labels, extracted visual features with pretrained convolutional networks, and trained a support vector regressor to predict BMI. The paper compared generic VGG-Net features with VGG-Face features, where VGG-Face was the stronger representation because it was pretrained specifically for faces.</p>
+        <p>The connection to my project is the evaluation. The paper reported Pearson correlation between true BMI and predicted BMI on a held-out test set. Their best reported overall result was <code>r = 0.65</code> with VGG-Face features and SVR. So the natural replication target is not just to build a BMI predictor, but to build one that exceeds that held-out correlation under a fair split.</p>
+      </section>
+
+      <section id="assignment">
+        <h2>Assignment</h2>
+        <p>The assignment was to replicate and extend the paper, then ship a simple real-time web API or demo. In plain English, “beat the paper” means that on examples the model did not train on, our predictions should linearly track true BMI better than the original paper's best model. Numerically, that means an overall Pearson correlation greater than <code>0.65</code>.</p>
+        <p>That definition matters because a model can look good for the wrong reason. The dataset appears to contain before/after pairs of the same person. If one image from a pair is in training and the other is in test, the model may learn identity-related features and appear more accurate than it really is. Therefore I treated beating the paper as a leakage-safe target: train, validation, and test should not share paired images from the same person.</p>
+      </section>
+
+      <section id="data">
+        <h2>Data We Have</h2>
+        <p>The dataset came from the course-provided <code>Copy of BMI.zip</code>. Inside the zip, the canonical metadata file was <code>BMI/Data/data.csv</code>. It contained columns for a row id, BMI, gender, an official training flag, and an image filename.</p>
+        <pre><code>columns = ["unnamed:_0", "bmi", "gender", "is_training", "name"]
+image_path = BMI/Data/Images/&lt;name&gt;</code></pre>
+        <p>I used exact image mapping rather than fuzzy filename search. This is important because fuzzy image matching can silently attach the wrong image to the wrong label. After exact path verification, the final available-image subset contained 3,955 clean rows.</p>
+        <p>The main data decision was the pair-safe grouping rule. Adjacent rows appear to correspond to before/after images of the same person, so I grouped rows by integer division of the metadata row id:</p>
+        <pre><code>df["row_id"] = df["unnamed:_0"].astype(int)
+df["pair_id"] = df["row_id"] // 2</code></pre>
+        <p>The final protocol used the provided <code>is_training</code> column for the official test split, then carved validation only out of the official training pool while keeping <code>pair_id</code> groups together. The final group-overlap audit was zero for train/validation, train/test, and validation/test.</p>
+      </section>
+
+      <section id="intuition">
+        <h2>Model Intuition</h2>
+        <p>The strongest clue from the original paper is that face-specialized features beat generic image features. VGG-Face worked better than VGG-Net because it was trained to represent faces. The modern version of that idea is ArcFace, a face-recognition embedding trained to separate identities in a highly discriminative feature space.</p>
+        <p>However, BMI from a face image is not purely an identity-recognition problem. Generic visual cues can still matter: pose, face shape, texture, lighting, and other visual patterns. For that reason I combined ArcFace with two modern general-purpose image representations: DINOv2 and ConvNeXt.</p>
+        <p>The intuition is that the three representations are complementary. ArcFace contributes face-geometry and identity-sensitive structure. DINOv2 contributes self-supervised semantic and shape information. ConvNeXt contributes strong supervised image features. Because the dataset has only a few thousand images, I avoided full end-to-end fine-tuning and instead used frozen embeddings with regularized regressors.</p>
+      </section>
+
+      <section id="training">
+        <h2>Training</h2>
+        <p>The training pipeline had three steps: construct the leakage-safe split, extract frozen features, and fit classical regressors. The split logic was:</p>
+        <pre><code># Pair-safe split
+pair_id = row_id // 2
+
+# Official paper-comparable test split
+train_pool = df[df["is_training"] == 1]
+test       = df[df["is_training"] == 0]
+
+# Validation is split only from train_pool,
+# with pair_id groups kept together.</code></pre>
+        <p>Each image was then encoded by ArcFace, DINOv2, and ConvNeXt. The final fused feature vector had 1,664 dimensions.</p>
+        <pre><code>X_arc   = arcface_features          # 512 dimensions
+X_dino  = dinov2_vits14_features    # 384 dimensions
+X_conv  = convnext_tiny_features    # 768 dimensions
+
+X = concatenate([X_arc, X_dino, X_conv])  # 1664 dimensions</code></pre>
+        <p>The simplest strong model was RidgeCV with mean imputation and standardization. This was important because ArcFace detection can fail on some images, producing missing values that need to be handled consistently.</p>
+        <pre><code>def ridge_model():
+    return make_pipeline(
+        SimpleImputer(strategy="mean"),
+        StandardScaler(),
+        RidgeCV(alphas=np.logspace(-4, 4, 41)),
+    )</code></pre>
+        <p>I also trained a quantile-target Ridge model and a PCA-SVR model. The final ensemble was selected using validation predictions only. The test set was reserved for final reporting.</p>
+        <pre><code># Validation-only ensemble selection
+selected = top_validation_models
+weights = optimize_validation_pearson(
+    selected,
+    nonnegative=True,
+    max_weight=0.50,
+)
+
+test_prediction = test_predictions[selected] @ weights</code></pre>
+      </section>
+
+      <section id="results">
+        <h2>Results</h2>
+        <p>The first exploratory run nearly matched the paper, but I did not treat it as final because the split was not pair-safe. Once I repaired the evaluation, the generic embedding baseline reached <code>r = 0.639</code>, slightly below the paper's <code>0.65</code>. This was a useful checkpoint: the stricter protocol made the problem harder.</p>
+        <p>The decisive improvement came from adding ArcFace. ArcFace alone was close to the paper target, and ArcFace fused with DINOv2 and ConvNeXt clearly exceeded it. The best simple single model reached <code>r = 0.7104</code>. The best validation-selected ensemble reached <code>r = 0.7216</code>.</p>
+        <p>The final result is therefore: on the official available-image, pair-safe split, the ArcFace + DINOv2 + ConvNeXt ensemble beat the original VGG-Face + SVR paper baseline. The improvement also held across gender subgroups, with female <code>r = 0.718</code> and male <code>r = 0.727</code>.</p>
+      </section>
+
+      <section id="demo">
+        <h2>Demo/API</h2>
+        <p>The final deliverable includes a minimal webcam-only API. A lightweight YuNet face detector tracks face boxes in real time, while the heavier ArcFace + DINOv2 + ConvNeXt BMI model runs only when the user presses the calculate button. This keeps the interface responsive while still using the stronger model for the actual prediction.</p>
+        <pre><code>GET  /              # webcam demo
+POST /detect        # lightweight YuNet face boxes
+POST /predict_multi # BMI predictions for up to six people
+POST /enroll        # optional local face-name enrollment</code></pre>
+      </section>
+
+      <section id="limitations">
+        <h2>Limitations</h2>
+        <p>The largest technical limitation is regression to the mean. The model tends to overpredict lower BMI and underpredict very high BMI, especially obesity class 3. This means the model can have a strong aggregate correlation while still producing poor individual estimates.</p>
+        <p>The largest ethical limitation is that face-based BMI prediction is sensitive and potentially biased. This project is an academic replication and critique, not a medical or decision-making tool. It should not be used for medical, employment, insurance, or personal decisions.</p>
+      </section>
+
+      <section id="tables" class="tables-only">
+        <h2>Tables</h2>
+        <h3>Paper baseline</h3>
         <table>
           <thead><tr><th>Paper model</th><th class="num">Male r</th><th class="num">Female r</th><th class="num">Overall r</th></tr></thead>
           <tbody>
@@ -132,34 +197,8 @@
             <tr><td>VGG-Face features + SVR</td><td class="num">0.71</td><td class="num">0.57</td><td class="num">0.65</td></tr>
           </tbody>
         </table>
-        <p>That <code>r = 0.65</code> number became the target. If we want to say we beat the paper, we need to beat that score on a held-out evaluation that is at least as honest as the original comparison.</p>
-      </section>
 
-      <section id="assignment">
-        <h2>Assignment</h2>
-        <p>The class assignment was to replicate and extend the paper, then build a simple real-time web API or demo. In plain English, “beat the paper” means:</p>
-        <div class="note"><strong>Beat the paper =</strong> on held-out examples not used for training or model selection, our predictions should linearly agree with true BMI better than the paper's reported best model. Numerically, this means overall Pearson correlation greater than <code>0.65</code>.</div>
-        <p>This does not mean the model is medically accurate, fair, or safe for real-world use. A high correlation means that, across the test set, predicted BMI tends to move in the same direction as true BMI. Individual predictions can still be wrong, and BMI itself is a limited health measure.</p>
-        <p>The main evaluation risk was leakage. The dataset appears to contain paired before/after images of the same person. If one image of a person is in training and the paired image is in test, the model may learn identity-like features rather than general BMI cues. Therefore, the project defines success as beating <code>0.65</code> under a pair-safe split.</p>
-      </section>
-
-      <section id="data">
-        <h2>Data We Have</h2>
-        <p>The dataset was provided as <code>Copy of BMI.zip</code>. Inside it, the canonical metadata file was <code>BMI/Data/data.csv</code> with columns for BMI, gender, official training flag, row id, and image name.</p>
-        <pre><code>columns = ["unnamed:_0", "bmi", "gender", "is_training", "name"]
-image_path = BMI/Data/Images/&lt;name&gt;</code></pre>
-        <p>The final pipeline used exact canonical image mapping. It did not use fuzzy filename search, because fuzzy matching can accidentally attach the wrong image to the wrong label.</p>
-        <div class="figure">
-          <div class="figure-title"><strong>Data audit</strong><span class="tag">Pair-safe protocol</span></div>
-          <div class="flow">
-            <div class="flow-step"><span class="tag">Raw</span><h4>4,206 rows</h4><p>Original metadata rows.</p></div>
-            <div class="flow-step"><span class="tag">Map</span><h4>Exact image paths</h4><p><code>BMI/Data/Images/&lt;name&gt;</code>.</p></div>
-            <div class="flow-step"><span class="tag">Filter</span><h4>3,955 rows</h4><p>Clean available-image subset.</p></div>
-            <div class="flow-step"><span class="tag">Group</span><h4>row_id // 2</h4><p>Before/after pair grouping.</p></div>
-            <div class="flow-step"><span class="tag">Split</span><h4>0 overlap</h4><p>No pair crosses train/val/test.</p></div>
-          </div>
-          <p class="caption"><strong>Figure 1.</strong> The core scientific correction was treating adjacent before/after rows as the same group for splitting.</p>
-        </div>
+        <h3>Final split audit</h3>
         <table>
           <thead><tr><th>Split</th><th class="num">Images</th><th class="num">Pair groups</th><th class="num">BMI mean</th><th class="num">BMI std</th></tr></thead>
           <tbody>
@@ -168,78 +207,8 @@ image_path = BMI/Data/Images/&lt;name&gt;</code></pre>
             <tr><td>Test</td><td class="num">748</td><td class="num">383</td><td class="num">33.46</td><td class="num">8.62</td></tr>
           </tbody>
         </table>
-      </section>
 
-      <section id="intuition">
-        <h2>Model Intuition</h2>
-        <p>The original paper's strongest model used <strong>face-specialized</strong> features. That is the main clue. A generic image model can see color, texture, pose, and face shape, but a face-recognition model is explicitly trained to encode stable facial structure. A modern version of that idea is ArcFace.</p>
-        <p>The final model uses three complementary frozen embeddings:</p>
-        <div class="two-col">
-          <div class="mini-card"><span class="tag">Face-recognition idea</span><h4>ArcFace / InsightFace</h4><p>Modern face-recognition embeddings. This is the closest conceptual successor to the paper's VGG-Face feature choice.</p></div>
-          <div class="mini-card"><span class="tag">General vision idea</span><h4>DINOv2 + ConvNeXt</h4><p>DINOv2 brings self-supervised visual representation learning; ConvNeXt brings strong supervised ImageNet-style features.</p></div>
-        </div>
-        <p>The intuition is not that any single embedding perfectly measures BMI. Instead, each embedding captures a different view of the image: identity/face geometry from ArcFace, broad semantic and shape information from DINOv2, and texture/appearance information from ConvNeXt. Because the dataset is small, frozen embeddings plus regularized regressors are safer than full end-to-end fine-tuning.</p>
-        <p>The papers/models that motivated the design were:</p>
-        <ul>
-          <li><strong>Face-to-BMI</strong>: use pretrained CNN features plus SVR for BMI regression.</li>
-          <li><strong>ArcFace</strong>: modern discriminative face-recognition embedding.</li>
-          <li><strong>DINOv2</strong>: strong general self-supervised visual representation.</li>
-          <li><strong>ConvNeXt</strong>: modernized CNN backbone with strong generic image features.</li>
-        </ul>
-      </section>
-
-      <section id="training">
-        <h2>Training</h2>
-        <p>The training pipeline has three stages: build a leakage-safe split, extract frozen features, and train classical regressors. The key split logic was:</p>
-        <pre><code>df["row_id"] = df["unnamed:_0"].astype(int)
-df["pair_id"] = df["row_id"] // 2
-
-# official test split from the dataset
-train_pool = df[df["is_training"] == 1]
-test       = df[df["is_training"] == 0]
-
-# validation is carved only from train_pool with pair_id grouping
-# requirement: no pair_id appears in more than one split</code></pre>
-        <p>After splitting, the feature matrix concatenated ArcFace, DINOv2, and ConvNeXt:</p>
-        <pre><code>X_arc   = arcface_features          # 512 dimensions
-X_dino  = dinov2_vits14_features    # 384 dimensions
-X_conv  = convnext_tiny_features    # 768 dimensions
-
-X = concatenate([X_arc, X_dino, X_conv])  # 1664 dimensions</code></pre>
-        <p>The strongest simple regressor was RidgeCV with imputation and standardization:</p>
-        <pre><code>def ridge_model():
-    return make_pipeline(
-        SimpleImputer(strategy="mean"),
-        StandardScaler(),
-        RidgeCV(alphas=np.logspace(-4, 4, 41)),
-    )</code></pre>
-        <p>We also tried target-transformed Ridge and PCA-SVR:</p>
-        <pre><code>def quantile_ridge_model(n_train):
-    return TransformedTargetRegressor(
-        regressor=ridge_model(),
-        transformer=QuantileTransformer(
-            n_quantiles=min(512, n_train),
-            output_distribution="normal",
-            random_state=42,
-        ),
-    )
-
-pca_svr = make_pipeline(
-    SimpleImputer(strategy="mean"),
-    StandardScaler(),
-    PCA(n_components=256, random_state=42),
-    SVR(kernel="rbf", C=10.0, epsilon=0.3, gamma="scale"),
-)</code></pre>
-        <p>The final ensemble was selected using validation predictions only. The test set was used only for final reporting.</p>
-        <pre><code># validation-only ensemble selection
-selected = top_validation_models
-weights = argmax_validation_pearson(selected, nonnegative=True, weight_cap=0.50)
-test_prediction = test_predictions[selected] @ weights</code></pre>
-      </section>
-
-      <section id="results">
-        <h2>Results</h2>
-        <p>The repaired v2 baseline did not beat the paper. That was useful: it showed the leakage-safe protocol was stricter than the exploratory random split. The jump came after adding ArcFace and fusing it with DINOv2 and ConvNeXt.</p>
+        <h3>Main results</h3>
         <table>
           <thead><tr><th>Model</th><th>Features</th><th>Regressor</th><th class="num">Test Pearson r</th><th class="num">Spearman</th><th class="num">MAE</th><th class="num">RMSE</th></tr></thead>
           <tbody>
@@ -250,7 +219,8 @@ test_prediction = test_predictions[selected] @ weights</code></pre>
             <tr><td>Best final v4</td><td>ArcFace + DINOv2 + ConvNeXt</td><td>validation ensemble</td><td class="num">0.722</td><td class="num">0.746</td><td class="num">4.434</td><td class="num">6.199</td></tr>
           </tbody>
         </table>
-        <p>Subgroup results were also stronger than the paper's reported subgroup correlations:</p>
+
+        <h3>Gender subgroup results</h3>
         <table>
           <thead><tr><th>Subgroup</th><th class="num">Paper r</th><th class="num">Our r</th><th class="num">n</th><th class="num">MAE</th><th class="num">Bias</th></tr></thead>
           <tbody>
@@ -259,25 +229,6 @@ test_prediction = test_predictions[selected] @ weights</code></pre>
             <tr><td>Overall</td><td class="num">0.65</td><td class="num">0.722</td><td class="num">748</td><td class="num">4.434</td><td class="num">-1.552</td></tr>
           </tbody>
         </table>
-        <div class="note"><strong>Conclusion:</strong> under the official available-image, pair-safe protocol, the ArcFace + DINOv2 + ConvNeXt ensemble achieved Pearson <code>r = 0.7216</code>, beating the paper's <code>r = 0.65</code>. The best single model also beat the paper at <code>r = 0.7104</code>.</div>
-      </section>
-
-      <section id="demo">
-        <h2>Demo/API</h2>
-        <p>The final deliverable includes a minimal webcam-only API. YuNet tracks up to six faces in real time, then the heavier model runs when the user presses “Calculate BMI.” The API can also optionally enroll names with consented face captures, so the overlay can show a name plus predicted BMI.</p>
-        <pre><code>uvicorn api:app --host 127.0.0.1 --port 8000
-
-GET  /             # webcam demo
-POST /detect       # lightweight YuNet face boxes
-POST /predict_multi # BMI predictions for up to six people
-POST /enroll       # optional local face-name enrollment</code></pre>
-      </section>
-
-      <section id="limitations">
-        <h2>Limitations</h2>
-        <p>The largest technical limitation is regression to the mean. The model tends to overpredict lower BMI and underpredict very high BMI, especially obesity class 3. This is visible in the BMI-category residuals.</p>
-        <p>The largest ethical limitation is that face-based BMI prediction is sensitive and potentially biased. This project is an academic replication and critique. It should not be used for medical, employment, insurance, or personal decisions.</p>
-        <div class="note warning">The model beating the paper does not make BMI-from-face a safe product. It only shows that modern embeddings and careful evaluation improve a specific benchmark.</div>
       </section>
 
       <p class="footer-note">Code, handoff notes, and the live GitHub Pages version are available in the public repository: <code>github.com/manuelarceaguirre/facefinalml2</code>.</p>
