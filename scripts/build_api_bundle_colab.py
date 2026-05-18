@@ -170,13 +170,19 @@ def build_split(data_csv: Path):
                 im.verify()
         except Exception:
             continue
+        bmi = float(row["bmi"])
+        # Match the final evaluation pipeline: exclude implausible metadata
+        # values before training/export. This yields the same canonical row
+        # universe used for reported metrics.
+        if not (13 <= bmi <= 70):
+            continue
         row_id = int(row[row_col])
         is_train = parse_bool(row["is_training"])
         rows.append({
             "source_index": int(idx),
             "row_id": row_id,
             "pair_id": row_id // 2,
-            "bmi": float(row["bmi"]),
+            "bmi": bmi,
             "gender": row["gender"],
             "is_training": is_train,
             "name": row["name"],

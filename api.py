@@ -22,7 +22,7 @@ from typing import Dict, Optional, Tuple
 
 import joblib
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from PIL import Image
 
@@ -59,6 +59,54 @@ def load_known_faces() -> Optional[dict]:
             emb = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-12)
         person["embeddings"] = emb
     return bundle
+
+
+def _normalize_embedding(v: np.ndarray) -> np.ndarray:
+    v = np.asarray(v, dtype=np.float32)
+    return v / (np.linalg.norm(v) + 1e-12)
+
+
+def save_known_face(name: str, arcface: np.ndarray) -> dict:
+    name = " ".join(str(name).strip().split())
+    if not name:
+        raise ValueError("Name is required")
+    if arcface is None or not np.isfinite(arcface).all():
+        raise ValueError("ArcFace embedding unavailable. Make sure a real face is visible and InsightFace is installed.")
+
+    emb = _normalize_embedding(arcface).reshape(1, -1)
+    if KNOWN_FACES_PATH.exists():
+        bundle = joblib.load(KNOWN_FACES_PATH)
+    else:
+        bundle = {
+            "version": "facefinalml2_known_faces_v1",
+            "threshold_default": RECOGNITION_THRESHOLD,
+            "people": [],
+        }
+
+    people = bundle.setdefault("people", [])
+    existing = None
+    for person in people:
+        if str(person.get("name", "")).strip().lower() == name.lower():
+            existing = person
+            break
+
+    if existing is None:
+        people.append({"name": name, "embeddings": emb.astype(np.float32), "n_images": 1})
+        n_images = 1
+    else:
+        old = np.asarray(existing.get("embeddings", []), dtype=np.float32)
+        if old.size == 0:
+            merged = emb
+        else:
+            merged = np.vstack([old, emb])
+        existing["embeddings"] = merged.astype(np.float32)
+        existing["n_images"] = int(len(merged))
+        n_images = int(len(merged))
+
+    KNOWN_FACES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(bundle, KNOWN_FACES_PATH)
+    load_known_faces.cache_clear()
+    return {"name": name, "n_images": n_images, "known_faces_path": str(KNOWN_FACES_PATH)}
 
 
 def recognize_face(arcface: np.ndarray) -> dict:
@@ -353,6 +401,24 @@ async def detect(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=500, detail=f"Detection failed: {exc}") from exc
 
 
+@app.post("/enroll")
+async def enroll(name: str = Form(...), file: UploadFile = File(...)) -> dict:
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Upload an image file.")
+    image_bytes = await file.read()
+    try:
+        rows = get_extractor().extract_many(image_bytes, max_faces=1)
+        if not rows:
+            raise ValueError("No face detected. Try better lighting and center your face.")
+        features, face_detected, bbox = rows[0]
+        if not face_detected:
+            raise ValueError("ArcFace did not detect a face. Try a clearer frontal face image.")
+        saved = save_known_face(name, features["arcface"])
+        return {"ok": True, "bbox": bbox, **saved}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Enrollment failed: {exc}") from exc
+
+
 @app.post("/predict_multi")
 async def predict_multi(file: UploadFile = File(...)) -> dict:
     if not file.content_type or not file.content_type.startswith("image/"):
@@ -423,7 +489,9 @@ def index() -> str:
     .muted, .small { color: var(--muted); }
     .small { font-size: 13px; }
     .card { border: 1px solid var(--line); background: var(--paper); padding: 18px; border-radius: 12px; margin: 16px 0; }
-    button { padding: 10px 14px; border: 1px solid #222; background: white; border-radius: 8px; cursor: pointer; font-weight: 650; }
+    button, input { padding: 10px 14px; border: 1px solid #222; background: white; border-radius: 8px; font-weight: 650; }
+    button { cursor: pointer; }
+    input { min-width: 220px; font-weight: 500; }
     button.primary { background: var(--ink); color: white; }
     button:disabled { opacity: .55; cursor: wait; }
     .stage { position: relative; width: min(100%, 760px); margin: 14px 0; background: #111; border-radius: 12px; overflow: hidden; border: 1px solid #222; }
@@ -447,6 +515,8 @@ def index() -> str:
     <div class="row">
       <button onclick="startCam()">Start webcam</button>
       <button id="calcBtn" class="primary" onclick="calculateBMI()">Calculate BMI for everyone</button>
+      <input id="nameInput" placeholder="Name for recognition" autocomplete="off" />
+      <button id="enrollBtn" onclick="enrollCurrentFace()">Capture for recognition</button>
       <span id="trackerPill" class="pill">tracker idle</span>
     </div>
 
@@ -478,6 +548,8 @@ const result = document.getElementById('result');
 const statusEl = document.getElementById('status');
 const trackerPill = document.getElementById('trackerPill');
 const calcBtn = document.getElementById('calcBtn');
+const enrollBtn = document.getElementById('enrollBtn');
+const nameInput = document.getElementById('nameInput');
 const peopleEl = document.getElementById('people');
 
 async function startCam() {
@@ -653,6 +725,32 @@ function renderPeople() {
         ${p.name || `Person ${p.track_id || p.person_id}`}: BMI ${p.predicted_bmi}
         <span>${p.recognized ? `recognized, similarity ${p.similarity}` : 'not recognized'}; ArcFace detected: ${p.face_detected}</span>
       </div>`).join('');
+}
+
+async function enrollCurrentFace() {
+  try {
+    if (!video.videoWidth) return alert('Start webcam first.');
+    const name = nameInput.value.trim();
+    if (!name) return alert('Type a name first.');
+    enrollBtn.disabled = true;
+    enrollBtn.textContent = 'Capturing...';
+    statusEl.textContent = `Enrolling ${name}. Look at the camera for one clear frame.`;
+
+    const blob = await frameBlob(0.94);
+    const form = new FormData();
+    form.append('name', name);
+    form.append('file', blob, 'enroll.jpg');
+    const res = await fetch('/enroll', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Enrollment failed');
+    predictions = [];
+    statusEl.textContent = `Saved ${data.name} for recognition (${data.n_images} sample${data.n_images === 1 ? '' : 's'}). Now press Calculate BMI.`;
+  } catch (e) {
+    statusEl.textContent = e.message;
+  } finally {
+    enrollBtn.disabled = false;
+    enrollBtn.textContent = 'Capture for recognition';
+  }
 }
 
 async function calculateBMI() {
