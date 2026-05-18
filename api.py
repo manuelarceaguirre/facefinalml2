@@ -51,15 +51,23 @@ class FeatureExtractor:
     def __init__(self) -> None:
         import torch
         import torchvision.transforms as T
-        from insightface.app import FaceAnalysis
         from torchvision.models import ConvNeXt_Tiny_Weights, convnext_tiny
 
         self.torch = torch
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if torch.cuda.is_available() else ["CPUExecutionProvider"]
-        self.face_app = FaceAnalysis(name="buffalo_l", providers=providers)
-        self.face_app.prepare(ctx_id=0 if torch.cuda.is_available() else -1, det_size=(640, 640))
+        # ArcFace is best when available, but local demo environments may not
+        # have insightface/onnxruntime installed. If unavailable, the API still
+        # runs by feeding NaNs for ArcFace; the sklearn imputer handles them.
+        self.face_app = None
+        try:
+            from insightface.app import FaceAnalysis
+
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if torch.cuda.is_available() else ["CPUExecutionProvider"]
+            self.face_app = FaceAnalysis(name="buffalo_l", providers=providers)
+            self.face_app.prepare(ctx_id=0 if torch.cuda.is_available() else -1, det_size=(640, 640))
+        except Exception as exc:
+            print(f"ArcFace disabled for this demo process: {exc}")
 
         self.dino = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14").to(self.device).eval()
         self.convnext = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT).features.to(self.device).eval()
@@ -87,6 +95,9 @@ class FeatureExtractor:
         return image.crop((nx1, ny1, nx2, ny2))
 
     def _detect_face(self, image: Image.Image) -> Tuple[np.ndarray, Image.Image, bool]:
+        if self.face_app is None:
+            return np.full(512, np.nan, dtype=np.float32), image, False
+
         # InsightFace expects BGR uint8.
         rgb = np.asarray(image.convert("RGB"))
         bgr = rgb[:, :, ::-1].copy()
