@@ -466,8 +466,9 @@ def index() -> str:
 <script>
 let tracking = false;
 let busyDetect = false;
-let faces = [];
+let tracks = [];
 let predictions = [];
+let nextTrackId = 1;
 
 const colors = ['#00ff88', '#00c2ff', '#ffcc00', '#ff5c8a', '#b26cff', '#ff7a00'];
 const video = document.getElementById('video');
@@ -504,6 +505,83 @@ function frameBlob(quality = 0.75) {
   return new Promise(resolve => capture.toBlob(resolve, 'image/jpeg', quality));
 }
 
+function center(b) { return { x: b.x + b.w / 2, y: b.y + b.h / 2 }; }
+
+function iou(a, b) {
+  const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.w, b.x + b.w), y2 = Math.min(a.y + a.h, b.y + b.h);
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const union = a.w * a.h + b.w * b.h - inter + 1e-6;
+  return inter / union;
+}
+
+function matchScore(a, b) {
+  const c1 = center(a), c2 = center(b);
+  const dist = Math.hypot(c1.x - c2.x, c1.y - c2.y);
+  const scale = Math.max(a.w, a.h, b.w, b.h, 1);
+  return iou(a, b) - 0.25 * (dist / scale);
+}
+
+function updateTracks(detections) {
+  const now = performance.now();
+  const unmatchedTracks = new Set(tracks.map(t => t.track_id));
+  const updated = [];
+
+  for (const det of detections.slice(0, 6)) {
+    const b = det.bbox;
+    if (!b) continue;
+    let best = null;
+    let bestScore = -Infinity;
+    for (const tr of tracks) {
+      if (!unmatchedTracks.has(tr.track_id)) continue;
+      const s = matchScore(b, tr.bbox);
+      if (s > bestScore) { bestScore = s; best = tr; }
+    }
+
+    // Keep ID if the box overlaps or moved a plausible distance.
+    const cB = center(b);
+    let reuse = false;
+    if (best) {
+      const cT = center(best.bbox);
+      const dist = Math.hypot(cB.x - cT.x, cB.y - cT.y);
+      reuse = iou(b, best.bbox) > 0.10 || dist < Math.max(b.w, b.h, best.bbox.w, best.bbox.h) * 0.9;
+    }
+
+    if (best && reuse) {
+      unmatchedTracks.delete(best.track_id);
+      updated.push({ ...det, bbox: b, track_id: best.track_id, last_seen: now });
+    } else {
+      updated.push({ ...det, bbox: b, track_id: nextTrackId++, last_seen: now });
+    }
+  }
+
+  // Keep recently lost tracks briefly to reduce flicker.
+  for (const tr of tracks) {
+    if (unmatchedTracks.has(tr.track_id) && now - tr.last_seen < 900) updated.push(tr);
+  }
+
+  tracks = updated.slice(0, 6);
+}
+
+function matchPredictionsToTracks(people) {
+  const remaining = new Set(tracks.map(t => t.track_id));
+  return people.slice(0, 6).map((p, idx) => {
+    if (!p.bbox || !tracks.length) return { ...p, track_id: idx + 1 };
+    let best = null;
+    let bestScore = -Infinity;
+    for (const tr of tracks) {
+      if (!remaining.has(tr.track_id)) continue;
+      const s = matchScore(p.bbox, tr.bbox);
+      if (s > bestScore) { bestScore = s; best = tr; }
+    }
+    if (best) {
+      remaining.delete(best.track_id);
+      return { ...p, track_id: best.track_id };
+    }
+    return { ...p, track_id: idx + 1 };
+  });
+}
+
 async function trackFaces() {
   if (!tracking || busyDetect || !video.videoWidth) return;
   busyDetect = true;
@@ -514,8 +592,8 @@ async function trackFaces() {
     const res = await fetch('/detect', { method: 'POST', body: form });
     const data = await res.json();
     if (res.ok) {
-      faces = (data.faces || []).slice(0, 6).map((f, i) => ({...f, person_id: i + 1}));
-      trackerPill.textContent = faces.length ? `${faces.length} face${faces.length === 1 ? '' : 's'} tracked` : 'no faces';
+      updateTracks(data.faces || []);
+      trackerPill.textContent = tracks.length ? `${tracks.length} face${tracks.length === 1 ? '' : 's'} tracked` : 'no faces';
     }
   } catch (e) {
     trackerPill.textContent = 'tracker error';
@@ -524,14 +602,8 @@ async function trackFaces() {
   }
 }
 
-function bmiForPerson(id) {
-  const p = predictions.find(x => x.person_id === id);
-  return p ? p.predicted_bmi : null;
-}
-
-function nameForPerson(id) {
-  const p = predictions.find(x => x.person_id === id);
-  return p && p.name ? p.name : `P${id}`;
+function predictionForTrack(trackId) {
+  return predictions.find(x => x.track_id === trackId);
 }
 
 function drawLoop() {
@@ -539,17 +611,15 @@ function drawLoop() {
   const ctx = overlay.getContext('2d');
   ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-  // Keep tracking live boxes after BMI calculation. Predictions only provide
-  // labels; YuNet continues to provide the current moving face boxes.
-  const drawFaces = faces.length ? faces : predictions;
-  drawFaces.slice(0, 6).forEach((row, i) => {
-    const b = row.bbox || (row.bbox === null ? null : row.bbox);
+  const drawRows = tracks.length ? tracks : predictions;
+  drawRows.slice(0, 6).forEach((row, i) => {
+    const b = row.bbox;
     if (!b) return;
-    const id = row.person_id || (i + 1);
-    const color = colors[(id - 1) % colors.length];
-    const bmi = row.predicted_bmi ?? bmiForPerson(id);
-    const who = nameForPerson(id);
-    const label = bmi !== null ? `${who} BMI ${bmi}` : who;
+    const trackId = row.track_id || row.person_id || (i + 1);
+    const pred = predictionForTrack(trackId) || row;
+    const color = colors[(trackId - 1) % colors.length];
+    const who = pred.name || `P${trackId}`;
+    const label = pred.predicted_bmi !== undefined && pred.predicted_bmi !== null ? `${who} BMI ${pred.predicted_bmi}` : who;
 
     // Video is mirrored for selfie UX, but the server returns coordinates in
     // unmirrored image space. Mirror only x-coordinates, not text.
@@ -575,11 +645,14 @@ function drawLoop() {
 
 function renderPeople() {
   if (!predictions.length) { peopleEl.innerHTML = ''; return; }
-  peopleEl.innerHTML = predictions.map((p, i) => `
-    <div class="person" style="border-color:${colors[i % colors.length]}">
-      ${p.name || `Person ${p.person_id}`}: BMI ${p.predicted_bmi}
-      <span>${p.recognized ? `recognized, similarity ${p.similarity}` : 'not recognized'}; ArcFace detected: ${p.face_detected}</span>
-    </div>`).join('');
+  peopleEl.innerHTML = predictions
+    .slice()
+    .sort((a, b) => (a.track_id || 0) - (b.track_id || 0))
+    .map((p) => `
+      <div class="person" style="border-color:${colors[((p.track_id || p.person_id) - 1) % colors.length]}">
+        ${p.name || `Person ${p.track_id || p.person_id}`}: BMI ${p.predicted_bmi}
+        <span>${p.recognized ? `recognized, similarity ${p.similarity}` : 'not recognized'}; ArcFace detected: ${p.face_detected}</span>
+      </div>`).join('');
 }
 
 async function calculateBMI() {
@@ -599,13 +672,17 @@ async function calculateBMI() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Prediction failed');
 
-    predictions = (data.people || []).slice(0, 6);
+    predictions = matchPredictionsToTracks(data.people || []);
     if (!predictions.length) {
       result.textContent = 'BMI --';
       statusEl.textContent = 'No faces detected. Try better lighting and center everyone in frame.';
       return;
     }
-    result.textContent = predictions.map(p => `P${p.person_id}: ${p.predicted_bmi}`).join('   ');
+    result.textContent = predictions
+      .slice()
+      .sort((a, b) => (a.track_id || 0) - (b.track_id || 0))
+      .map(p => `${p.name || `P${p.track_id || p.person_id}`}: ${p.predicted_bmi}`)
+      .join('   ');
     statusEl.textContent = `${predictions.length} prediction${predictions.length === 1 ? '' : 's'} complete. ${data.warning}`;
     renderPeople();
   } catch (e) {
