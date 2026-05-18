@@ -5,8 +5,9 @@ This is the simplest functional API/demo for the final model family.
 ## What it serves
 
 - `GET /` webcam-only browser demo.
-- `POST /detect` lightweight YuNet CPU face-box tracking endpoint.
-- `POST /predict` heavier BMI endpoint using ArcFace when available, plus DINOv2 and ConvNeXt.
+- `POST /detect` lightweight YuNet CPU face-box tracking endpoint for up to 6 faces.
+- `POST /predict_multi` heavier BMI endpoint for up to 6 people using ArcFace when available, plus DINOv2 and ConvNeXt.
+- `POST /predict` backwards-compatible single-person BMI endpoint.
 - `GET /health` model-bundle status.
 
 The API uses a private sklearn deployment bundle:
@@ -74,22 +75,28 @@ Open:
 http://localhost:8000
 ```
 
-The page is webcam-only: click **Start webcam**, center your face, then click **Calculate BMI**. The green box is tracked with YuNet for responsiveness; the BMI calculation uses the heavier model.
+The page is webcam-only: click **Start webcam**, get up to six people in frame, then click **Calculate BMI for everyone**. Colored boxes are tracked with YuNet for responsiveness; the BMI calculation uses the heavier model.
 
-## Call the BMI endpoint
+## Call the multi-person BMI endpoint
 
 ```bash
-curl -X POST http://localhost:8000/predict \
-  -F "file=@/path/to/face.jpg"
+curl -X POST http://localhost:8000/predict_multi \
+  -F "file=@/path/to/group_photo.jpg"
 ```
 
 Example response:
 
 ```json
 {
-  "predicted_bmi": 31.42,
-  "face_detected": true,
-  "bbox": {"x": 140.0, "y": 80.0, "w": 180.0, "h": 180.0},
+  "people": [
+    {
+      "person_id": 1,
+      "predicted_bmi": 31.42,
+      "face_detected": true,
+      "bbox": {"x": 140.0, "y": 80.0, "w": 180.0, "h": 180.0}
+    }
+  ],
+  "count": 1,
   "model_version": "facefinalml2_api_v1_arcface_dinov2_convnext_ridge",
   "warning": "Academic demo only. Not for medical or personal decisions."
 }
