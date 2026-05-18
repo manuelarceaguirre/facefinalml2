@@ -130,39 +130,144 @@ df["pair_id"] = df["row_id"] // 2</code></pre>
 
       <section id="training">
         <h2>Training</h2>
-        <p>The training pipeline had three steps: construct the leakage-safe split, extract frozen features, and fit classical regressors. The split logic was:</p>
-        <pre><code># Pair-safe split
-pair_id = row_id // 2
+        <p>The training code is intentionally closer to a classical machine-learning pipeline than a fine-tuning script. The heavy networks are used as frozen feature extractors, and the only learned component is a lightweight regressor on top of their embeddings. This made the experiment faster, easier to audit, and less likely to overfit a dataset with only a few thousand labeled images.</p>
 
-# Official paper-comparable test split
-train_pool = df[df["is_training"] == 1]
-test       = df[df["is_training"] == 0]
+        <p>The first important code block is the split. The metadata gives an official <code>is_training</code> flag, but I still needed to protect against before/after pair leakage. I treated adjacent metadata rows as the same person-level group and made sure no group crossed train, validation, and test.</p>
+        <pre><code>def make_pair_safe_split(df):
+    df = df.copy()
 
-# Validation is split only from train_pool,
-# with pair_id groups kept together.</code></pre>
-        <p>Each image was then encoded by ArcFace, DINOv2, and ConvNeXt. The final fused feature vector had 1,664 dimensions.</p>
-        <pre><code>X_arc   = arcface_features          # 512 dimensions
-X_dino  = dinov2_vits14_features    # 384 dimensions
-X_conv  = convnext_tiny_features    # 768 dimensions
+    # The metadata row id is the stable row identifier from data.csv.
+    df["row_id"] = df["unnamed:_0"].astype(int)
 
-X = concatenate([X_arc, X_dino, X_conv])  # 1664 dimensions</code></pre>
-        <p>The simplest strong model was RidgeCV with mean imputation and standardization. This was important because ArcFace detection can fail on some images, producing missing values that need to be handled consistently.</p>
+    # Adjacent rows appear to be before/after images of the same person.
+    # This group id is the leakage barrier.
+    df["pair_id"] = df["row_id"] // 2
+
+    # Use the paper-comparable official test split.
+    train_pool = df[df["is_training"] == 1].copy()
+    test       = df[df["is_training"] == 0].copy()
+
+    # Split validation only from the official training pool.
+    splitter = StratifiedGroupKFold(
+        n_splits=5,
+        shuffle=True,
+        random_state=42,
+    )
+    strata = train_pool["gender_clean"] + "_" + train_pool["bmi_cat"]
+    train_idx, val_idx = next(
+        splitter.split(train_pool, strata, groups=train_pool["pair_id"])
+    )
+
+    train = train_pool.iloc[train_idx].copy()
+    val   = train_pool.iloc[val_idx].copy()
+
+    assert set(train.pair_id).isdisjoint(val.pair_id)
+    assert set(train.pair_id).isdisjoint(test.pair_id)
+    assert set(val.pair_id).isdisjoint(test.pair_id)
+
+    train["split"] = "train"
+    val["split"] = "val"
+    test["split"] = "test"
+    return pd.concat([train, val, test], ignore_index=True)</code></pre>
+
+        <p>The second key block is feature extraction. For each image, the pipeline obtains three frozen representations. ArcFace is the face-specialized branch; DINOv2 and ConvNeXt are general visual branches. If ArcFace fails to detect a face, the feature vector is filled with missing values and the downstream imputer handles it.</p>
+        <pre><code>def extract_frozen_features(image):
+    # ArcFace / InsightFace branch: face-specific representation.
+    face = insightface_app.get(to_bgr(image))
+    if face:
+        best_face = max(face, key=lambda f: f.det_score)
+        arcface = best_face.embedding.astype("float32")       # 512-d
+        crop = loose_face_crop(image, best_face.bbox)
+    else:
+        arcface = np.full(512, np.nan, dtype="float32")
+        crop = center_crop(image)
+
+    # DINOv2 branch: self-supervised generic visual representation.
+    dinov2 = dinov2_vits14(preprocess(crop))                 # 384-d
+
+    # ConvNeXt branch: supervised ImageNet-style visual representation.
+    conv = convnext_tiny.features(preprocess(crop))
+    convnext = adaptive_avg_pool2d(conv, 1).flatten()         # 768-d
+
+    return arcface, dinov2, convnext</code></pre>
+
+        <p>The frozen vectors are then concatenated into a single feature vector. This is the central modeling idea: do not ask one representation to capture everything. Let a face-recognition embedding, a self-supervised transformer embedding, and a modern CNN embedding each contribute complementary signals.</p>
+        <pre><code>X_arc   = load("arcface_buffalo_l_original.npy")  # n x 512
+X_dino  = load("dinov2_vits14_loose.npy")         # n x 384
+X_conv  = load("convnext_loose.npy")              # n x 768
+
+X_fused = np.concatenate([X_arc, X_dino, X_conv], axis=1)
+# X_fused shape: n x 1664</code></pre>
+
+        <p>The simplest strong regressor was RidgeCV. The imputer is important because some face detections fail. The scaler is important because the three embedding families do not naturally live on the same numerical scale. Ridge regularization is important because the fused vector has 1,664 dimensions and the dataset is relatively small.</p>
         <pre><code>def ridge_model():
     return make_pipeline(
         SimpleImputer(strategy="mean"),
         StandardScaler(),
         RidgeCV(alphas=np.logspace(-4, 4, 41)),
+    )
+
+model = ridge_model()
+model.fit(X_fused[train_mask], y[train_mask])
+
+val_pred  = model.predict(X_fused[val_mask])
+test_pred = model.predict(X_fused[test_mask])</code></pre>
+
+        <p>I also trained two variants that are useful for tabular-style regression on frozen embeddings. The first transforms the target distribution before Ridge regression. The second compresses the feature vector with PCA before an RBF-kernel SVR.</p>
+        <pre><code>def quantile_ridge_model(n_train):
+    return TransformedTargetRegressor(
+        regressor=ridge_model(),
+        transformer=QuantileTransformer(
+            n_quantiles=min(512, n_train),
+            output_distribution="normal",
+            random_state=42,
+        ),
+    )
+
+def pca_svr_model(n_features):
+    return make_pipeline(
+        SimpleImputer(strategy="mean"),
+        StandardScaler(),
+        PCA(n_components=min(256, n_features - 1), random_state=42),
+        SVR(kernel="rbf", C=10.0, epsilon=0.3, gamma="scale"),
     )</code></pre>
-        <p>I also trained a quantile-target Ridge model and a PCA-SVR model. The final ensemble was selected using validation predictions only. The test set was reserved for final reporting.</p>
-        <pre><code># Validation-only ensemble selection
-selected = top_validation_models
-weights = optimize_validation_pearson(
-    selected,
-    nonnegative=True,
-    max_weight=0.50,
+
+        <p>The ensemble was deliberately selected on validation predictions only. This is the part that prevents the test set from becoming a tuning set. I ranked candidate models by validation correlation, removed near-duplicate predictions, then optimized nonnegative weights with a cap so no single component could dominate too aggressively.</p>
+        <pre><code>def validation_objective(weights, P_val, y_val):
+    weights = np.maximum(weights, 0)
+    weights = weights / (weights.sum() + 1e-12)
+    pred = P_val @ weights
+    return -pearsonr(y_val, pred)[0]
+
+selected = decorrelated_top_validation_models
+P_val = val_predictions[selected]
+
+result = minimize(
+    validation_objective,
+    x0=np.ones(len(selected)) / len(selected),
+    args=(P_val, y_val),
+    method="SLSQP",
+    bounds=[(0, 0.50)] * len(selected),
+    constraints={"type": "eq", "fun": lambda w: np.sum(w) - 1.0},
 )
 
-test_prediction = test_predictions[selected] @ weights</code></pre>
+weights = np.maximum(result.x, 0)
+weights = weights / weights.sum()
+
+test_pred = test_predictions[selected] @ weights</code></pre>
+
+        <p>Finally, every model and ensemble was evaluated with the same metric function. Pearson correlation was the primary paper-comparison metric, but I also tracked Spearman correlation, MAE, RMSE, R², bias, and tolerance bands so the report would not rely on a single number.</p>
+        <pre><code>def regression_metrics(y_true, y_pred):
+    return {
+        "pearson_r": pearsonr(y_true, y_pred)[0],
+        "spearman_rho": spearmanr(y_true, y_pred).correlation,
+        "mae": mean_absolute_error(y_true, y_pred),
+        "rmse": np.sqrt(mean_squared_error(y_true, y_pred)),
+        "r2": r2_score(y_true, y_pred),
+        "bias": np.mean(y_pred - y_true),
+        "within_2": np.mean(np.abs(y_pred - y_true) <= 2.0),
+        "within_5": np.mean(np.abs(y_pred - y_true) <= 5.0),
+    }</code></pre>
       </section>
 
       <section id="results">
