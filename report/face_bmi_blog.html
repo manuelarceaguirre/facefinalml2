@@ -50,6 +50,7 @@
     .lead { font-size:22px; line-height:1.42; }
     ul { margin:0 0 20px 24px; padding:0; }
     li { margin:6px 0; }
+    .pipeline-diagram { display:block; width:100%; height:auto; margin:24px 0 30px; border:1px solid var(--hairline); background:#fff; }
     table { width:100%; border-collapse:collapse; margin:18px 0 34px; font-size:15px; }
     th, td { border-bottom:1px solid var(--hairline); padding:9px 8px; text-align:left; vertical-align:top; }
     th { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); font-weight:500; }
@@ -126,6 +127,7 @@ df["pair_id"] = df["row_id"] // 2</code></pre>
         <p>The strongest clue from the original paper is that face-specialized features beat generic image features. VGG-Face worked better than VGG-Net because it was trained to represent faces. The modern version of that idea is ArcFace, a face-recognition embedding trained to separate identities in a highly discriminative feature space.</p>
         <p>However, BMI from a face image is not purely an identity-recognition problem. Generic visual cues can still matter: pose, face shape, texture, lighting, and other visual patterns. For that reason I combined ArcFace with two modern general-purpose image representations: DINOv2 and ConvNeXt.</p>
         <p>The intuition is that the three representations are complementary. ArcFace contributes face-geometry and identity-sensitive structure. DINOv2 contributes self-supervised semantic and shape information. ConvNeXt contributes strong supervised image features. Because the dataset has only a few thousand images, I avoided full end-to-end fine-tuning and instead used frozen embeddings with regularized regressors.</p>
+        <img class="pipeline-diagram" src="assets/diagram.png" alt="Pipeline diagram showing a face image split into ArcFace, DINOv2, and ConvNeXt frozen feature extractors, concatenated into a fused feature vector and passed into a regressor to output predicted BMI." />
       </section>
 
       <section id="training">
