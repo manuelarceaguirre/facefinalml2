@@ -13,10 +13,13 @@ What it does:
   7. Saves models/face_bmi_api_bundle.joblib.
   8. Copies the bundle to Google Drive and triggers a browser download.
 
-Run in Colab:
+Run in Colab as a notebook cell, not as a shell-only Python process:
   !git clone https://github.com/manuelarceaguirre/facefinalml2.git /content/facefinalml2
   %cd /content/facefinalml2
-  !python scripts/build_api_bundle_colab.py
+  %run scripts/build_api_bundle_colab.py
+
+Important: use `%run`, not `!python`, because Google Colab's interactive
+Drive authentication requires the IPython kernel context.
 """
 
 from __future__ import annotations
