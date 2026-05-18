@@ -135,7 +135,6 @@ df["pair_id"] = df["row_id"] // 2</code></pre>
         <p>The strongest clue from the original paper is that face-specialized features beat generic image features. VGG-Face worked better than VGG-Net because it was trained to represent faces. The modern version of that idea is ArcFace, a face-recognition embedding trained to separate identities in a highly discriminative feature space.</p>
         <p>However, BMI from a face image is not purely an identity-recognition problem. Generic visual cues can still matter: pose, face shape, texture, lighting, and other visual patterns. For that reason we combined ArcFace with two modern general-purpose image representations: DINOv2 and ConvNeXt.</p>
         <p>The intuition is that the three representations are complementary. ArcFace contributes face-geometry and identity-sensitive structure. DINOv2 contributes self-supervised semantic and shape information. ConvNeXt contributes strong supervised image features. Because the dataset has only a few thousand images, we avoided full end-to-end fine-tuning and instead used frozen embeddings with regularized regressors.</p>
-        <img class="pipeline-diagram" src="assets/diagram.png" alt="Pipeline diagram showing a face image split into ArcFace, DINOv2, and ConvNeXt frozen feature extractors, concatenated into a fused feature vector and passed into a regressor to output predicted BMI." />
       </section>
 
       <section id="training">
@@ -202,6 +201,7 @@ df["pair_id"] = df["row_id"] // 2</code></pre>
     return arcface, dinov2, convnext</code></pre>
 
         <p>The frozen vectors are then concatenated into a single feature vector. This is the central modeling idea: do not ask one representation to capture everything. Let a face-recognition embedding, a self-supervised transformer embedding, and a modern CNN embedding each contribute complementary signals.</p>
+        <img class="pipeline-diagram" src="assets/feature_fusion_diagram.png" alt="Neural-network style diagram showing a face image sent to three frozen feature extractors, ArcFace, DINOv2, and ConvNeXt, whose feature vectors are concatenated and passed to a regularized regressor to output predicted BMI." />
         <pre><code>X_arc   = load("arcface_buffalo_l_original.npy")  # n x 512
 X_dino  = load("dinov2_vits14_loose.npy")         # n x 384
 X_conv  = load("convnext_loose.npy")              # n x 768
