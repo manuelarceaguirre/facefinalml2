@@ -102,6 +102,28 @@ Example response:
 }
 ```
 
+## Optional classroom name recognition
+
+If classmates have explicitly opted in, add public/consented photos under:
+
+```text
+known_faces/<Person Name>/*.jpg
+```
+
+Then run:
+
+```bash
+python scripts/enroll_known_faces.py
+```
+
+This creates:
+
+```text
+models/known_faces.joblib
+```
+
+At demo time, `/predict_multi` compares each detected ArcFace embedding against this local registry and shows the recognized name on the face box when similarity is above the threshold. BMI labels are still predicted live; you do not need ground-truth BMI for enrolled people.
+
 ## Important limitation
 
 This is an academic demo only. BMI prediction from face images is noisy, privacy-sensitive, and potentially biased. Do not use it for medical, employment, insurance, or personal decisions.

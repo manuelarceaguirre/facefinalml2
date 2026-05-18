@@ -4,6 +4,8 @@
 /models/*
 !/models/.gitkeep
 /outputs/
+/known_faces/*
+!/known_faces/README.md
 face_bmi_pipeline.out
 run_face_bmi_pipeline.py
 chatgpt_pro_master_prompt.txt

@@ -27,6 +27,8 @@ from fastapi.responses import HTMLResponse
 from PIL import Image
 
 MODEL_PATH = Path(os.getenv("FACEBMI_MODEL", "models/face_bmi_api_bundle.joblib"))
+KNOWN_FACES_PATH = Path(os.getenv("FACEBMI_KNOWN_FACES", "models/known_faces.joblib"))
+RECOGNITION_THRESHOLD = float(os.getenv("FACEBMI_RECOGNITION_THRESHOLD", "0.32"))
 YUNET_PATH = Path(os.getenv("FACEBMI_YUNET", "models/face_detection_yunet_2023mar.onnx"))
 YUNET_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 
@@ -43,6 +45,43 @@ def load_bundle() -> dict:
     bundle = joblib.load(MODEL_PATH)
     _patch_sklearn_compat(bundle)
     return bundle
+
+
+@lru_cache(maxsize=1)
+def load_known_faces() -> Optional[dict]:
+    if not KNOWN_FACES_PATH.exists():
+        return None
+    bundle = joblib.load(KNOWN_FACES_PATH)
+    # Ensure all stored embeddings are unit-normalized.
+    for person in bundle.get("people", []):
+        emb = np.asarray(person.get("embeddings", []), dtype=np.float32)
+        if emb.size:
+            emb = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-12)
+        person["embeddings"] = emb
+    return bundle
+
+
+def recognize_face(arcface: np.ndarray) -> dict:
+    registry = load_known_faces()
+    if registry is None or arcface is None or not np.isfinite(arcface).all():
+        return {"name": None, "similarity": None, "recognized": False}
+
+    q = np.asarray(arcface, dtype=np.float32)
+    q = q / (np.linalg.norm(q) + 1e-12)
+    best_name = None
+    best_score = -1.0
+    for person in registry.get("people", []):
+        emb = np.asarray(person.get("embeddings", []), dtype=np.float32)
+        if emb.size == 0:
+            continue
+        score = float(np.max(emb @ q))
+        if score > best_score:
+            best_score = score
+            best_name = person.get("name")
+
+    if best_name is not None and best_score >= RECOGNITION_THRESHOLD:
+        return {"name": best_name, "similarity": round(best_score, 4), "recognized": True}
+    return {"name": None, "similarity": round(best_score, 4) if best_score >= 0 else None, "recognized": False}
 
 
 def _patch_sklearn_compat(obj) -> None:
@@ -297,6 +336,8 @@ def health() -> dict:
     return {
         "ok": MODEL_PATH.exists(),
         "model_path": str(MODEL_PATH),
+        "known_faces_path": str(KNOWN_FACES_PATH),
+        "known_faces_loaded": KNOWN_FACES_PATH.exists(),
         "message": "ready" if MODEL_PATH.exists() else "missing model bundle",
     }
 
@@ -328,8 +369,12 @@ async def predict_multi(file: UploadFile = File(...)) -> dict:
         people = []
         for idx, (features, face_detected, bbox) in enumerate(extracted, start=1):
             bmi = predict_from_features(bundle, features)
+            identity = recognize_face(features.get("arcface"))
             people.append({
                 "person_id": idx,
+                "name": identity["name"],
+                "recognized": identity["recognized"],
+                "similarity": identity["similarity"],
                 "predicted_bmi": round(bmi, 2),
                 "face_detected": face_detected,
                 "bbox": bbox,
@@ -351,6 +396,9 @@ async def predict(file: UploadFile = File(...)) -> dict:
     first = result["people"][0] if result["people"] else {"predicted_bmi": None, "face_detected": False, "bbox": None}
     return {
         "predicted_bmi": first["predicted_bmi"],
+        "name": first.get("name"),
+        "recognized": first.get("recognized", False),
+        "similarity": first.get("similarity"),
         "face_detected": first["face_detected"],
         "bbox": first["bbox"],
         "model_version": result.get("model_version", "unknown"),
@@ -480,6 +528,11 @@ function bmiForPerson(id) {
   return p ? p.predicted_bmi : null;
 }
 
+function nameForPerson(id) {
+  const p = predictions.find(x => x.person_id === id);
+  return p && p.name ? p.name : `P${id}`;
+}
+
 function drawLoop() {
   resizeOverlay();
   const ctx = overlay.getContext('2d');
@@ -494,7 +547,8 @@ function drawLoop() {
     const id = row.person_id || (i + 1);
     const color = colors[(id - 1) % colors.length];
     const bmi = row.predicted_bmi ?? bmiForPerson(id);
-    const label = bmi !== null ? `P${id} BMI ${bmi}` : `P${id}`;
+    const who = nameForPerson(id);
+    const label = bmi !== null ? `${who} BMI ${bmi}` : who;
 
     ctx.lineWidth = Math.max(3, overlay.width / 240);
     ctx.strokeStyle = color;
@@ -518,8 +572,8 @@ function renderPeople() {
   if (!predictions.length) { peopleEl.innerHTML = ''; return; }
   peopleEl.innerHTML = predictions.map((p, i) => `
     <div class="person" style="border-color:${colors[i % colors.length]}">
-      Person ${p.person_id}: BMI ${p.predicted_bmi}
-      <span>ArcFace detected: ${p.face_detected}</span>
+      ${p.name || `Person ${p.person_id}`}: BMI ${p.predicted_bmi}
+      <span>${p.recognized ? `recognized, similarity ${p.similarity}` : 'not recognized'}; ArcFace detected: ${p.face_detected}</span>
     </div>`).join('');
 }
 
