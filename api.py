@@ -37,7 +37,29 @@ def load_bundle() -> dict:
             f"Model bundle not found: {MODEL_PATH}. "
             "Create it in Colab with scripts/export_api_model_from_colab.py and copy it into models/."
         )
-    return joblib.load(MODEL_PATH)
+    bundle = joblib.load(MODEL_PATH)
+    _patch_sklearn_compat(bundle)
+    return bundle
+
+
+def _patch_sklearn_compat(obj) -> None:
+    """Patch small sklearn pickle incompatibilities across minor versions.
+
+    The demo bundle was exported in Colab with sklearn 1.6.1. Some local
+    environments may run newer sklearn versions whose SimpleImputer expects a
+    private `_fill_dtype` attribute. Reconstruct it from `_fit_dtype` so the
+    public demo remains runnable without forcing an exact sklearn pin.
+    """
+    if isinstance(obj, dict):
+        for value in obj.values():
+            _patch_sklearn_compat(value)
+        return
+    steps = getattr(obj, "steps", None)
+    if steps is not None:
+        for _, step in steps:
+            _patch_sklearn_compat(step)
+    if obj.__class__.__name__ == "SimpleImputer" and not hasattr(obj, "_fill_dtype"):
+        obj._fill_dtype = getattr(obj, "_fit_dtype", np.float64)
 
 
 class FeatureExtractor:
