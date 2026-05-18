@@ -286,6 +286,7 @@ test_pred = test_predictions[selected] @ weights</code></pre>
       <section id="demo">
         <h2>Demo/API</h2>
         <p>The final deliverable includes a minimal webcam-only API. A lightweight YuNet face detector tracks face boxes in real time, while the heavier ArcFace + DINOv2 + ConvNeXt BMI model runs only when the user presses the calculate button. This keeps the interface responsive while still using the stronger model for the actual prediction.</p>
+        <img class="pipeline-diagram" src="assets/demo_screenshot.png" alt="Screenshot of the webcam BMI demo showing live face boxes and BMI predictions over the video stream." />
         <pre><code>GET  /              # webcam demo
 POST /detect        # lightweight YuNet face boxes
 POST /predict_multi # BMI predictions for up to six people
