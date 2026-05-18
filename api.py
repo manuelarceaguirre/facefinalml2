@@ -427,7 +427,7 @@ def index() -> str:
     button.primary { background: var(--ink); color: white; }
     button:disabled { opacity: .55; cursor: wait; }
     .stage { position: relative; width: min(100%, 760px); margin: 14px 0; background: #111; border-radius: 12px; overflow: hidden; border: 1px solid #222; }
-    video, canvas.overlay { display: block; width: 100%; height: auto; }
+    video, canvas.overlay { display: block; width: 100%; height: auto; transform: scaleX(-1); }
     canvas.overlay { position: absolute; inset: 0; pointer-events: none; }
     #result { font-size: clamp(24px, 5vw, 46px); font-weight: 800; letter-spacing: -0.05em; margin: 8px 0 0; }
     #status { min-height: 20px; }
