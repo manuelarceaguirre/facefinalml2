@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import io
 import os
+import urllib.request
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -26,6 +27,8 @@ from fastapi.responses import HTMLResponse
 from PIL import Image
 
 MODEL_PATH = Path(os.getenv("FACEBMI_MODEL", "models/face_bmi_api_bundle.joblib"))
+YUNET_PATH = Path(os.getenv("FACEBMI_YUNET", "models/face_detection_yunet_2023mar.onnx"))
+YUNET_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 
 app = FastAPI(title="FaceFinalML2 BMI API", version="1.0")
 
@@ -60,6 +63,57 @@ def _patch_sklearn_compat(obj) -> None:
             _patch_sklearn_compat(step)
     if obj.__class__.__name__ == "SimpleImputer" and not hasattr(obj, "_fill_dtype"):
         obj._fill_dtype = getattr(obj, "_fit_dtype", np.float64)
+
+
+def _bbox_dict_xyxy(bbox: np.ndarray, width: int, height: int) -> dict:
+    x1, y1, x2, y2 = [float(v) for v in bbox]
+    x1 = max(0.0, min(float(width), x1))
+    x2 = max(0.0, min(float(width), x2))
+    y1 = max(0.0, min(float(height), y1))
+    y2 = max(0.0, min(float(height), y2))
+    return {"x": x1, "y": y1, "w": max(0.0, x2 - x1), "h": max(0.0, y2 - y1)}
+
+
+class YuNetDetector:
+    """Small CPU face detector for real-time webcam box tracking."""
+
+    def __init__(self) -> None:
+        import cv2
+
+        self.cv2 = cv2
+        YUNET_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if not YUNET_PATH.exists():
+            print(f"Downloading YuNet face detector to {YUNET_PATH}")
+            urllib.request.urlretrieve(YUNET_URL, YUNET_PATH)
+        self.detector = cv2.FaceDetectorYN_create(
+            str(YUNET_PATH),
+            "",
+            (320, 320),
+            score_threshold=0.7,
+            nms_threshold=0.3,
+            top_k=5000,
+        )
+
+    def detect(self, image_bytes: bytes) -> dict:
+        cv2 = self.cv2
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if bgr is None:
+            raise ValueError("Could not decode image")
+        height, width = bgr.shape[:2]
+        self.detector.setInputSize((width, height))
+        _, faces = self.detector.detect(bgr)
+        if faces is None or len(faces) == 0:
+            return {"face_detected": False, "bbox": None, "image_width": width, "image_height": height}
+        face = max(faces, key=lambda f: float(f[14]) if len(f) > 14 else float(f[2] * f[3]))
+        x, y, w, h = [float(v) for v in face[:4]]
+        bbox = _bbox_dict_xyxy(np.array([x, y, x + w, y + h], dtype=float), width, height)
+        return {"face_detected": True, "bbox": bbox, "image_width": width, "image_height": height}
+
+
+@lru_cache(maxsize=1)
+def get_yunet() -> YuNetDetector:
+    return YuNetDetector()
 
 
 class FeatureExtractor:
@@ -116,21 +170,23 @@ class FeatureExtractor:
             return image
         return image.crop((nx1, ny1, nx2, ny2))
 
-    def _detect_face(self, image: Image.Image) -> Tuple[np.ndarray, Image.Image, bool]:
+    def _detect_face(self, image: Image.Image) -> Tuple[np.ndarray, Image.Image, bool, Optional[dict]]:
         if self.face_app is None:
-            return np.full(512, np.nan, dtype=np.float32), image, False
+            return np.full(512, np.nan, dtype=np.float32), image, False, None
 
         # InsightFace expects BGR uint8.
         rgb = np.asarray(image.convert("RGB"))
         bgr = rgb[:, :, ::-1].copy()
         faces = self.face_app.get(bgr)
         if not faces:
-            return np.full(512, np.nan, dtype=np.float32), image, False
+            return np.full(512, np.nan, dtype=np.float32), image, False, None
 
         face = max(faces, key=lambda f: float(getattr(f, "det_score", 0.0)))
+        raw_bbox = np.asarray(face.bbox)
         arcface = np.asarray(face.embedding, dtype=np.float32)
-        crop = self._loose_crop(image, np.asarray(face.bbox))
-        return arcface, crop, True
+        crop = self._loose_crop(image, raw_bbox)
+        bbox = _bbox_dict_xyxy(raw_bbox, image.width, image.height)
+        return arcface, crop, True, bbox
 
     def _vision_features(self, image: Image.Image) -> Tuple[np.ndarray, np.ndarray]:
         torch = self.torch
@@ -146,9 +202,9 @@ class FeatureExtractor:
             conv = conv.detach().cpu().numpy().reshape(-1).astype(np.float32)
         return dino, conv
 
-    def extract(self, image_bytes: bytes) -> Tuple[Dict[str, np.ndarray], bool]:
+    def extract(self, image_bytes: bytes) -> Tuple[Dict[str, np.ndarray], bool, Optional[dict]]:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        arcface, crop, face_detected = self._detect_face(image)
+        arcface, crop, face_detected, bbox = self._detect_face(image)
         dinov2, convnext = self._vision_features(crop)
         features = {
             "arcface": arcface,
@@ -159,7 +215,7 @@ class FeatureExtractor:
             "dinov2_convnext": np.concatenate([dinov2, convnext]),
             "arcface_dinov2_convnext": np.concatenate([arcface, dinov2, convnext]),
         }
-        return features, face_detected
+        return features, face_detected, bbox
 
 
 @lru_cache(maxsize=1)
@@ -198,6 +254,17 @@ def health() -> dict:
     }
 
 
+@app.post("/detect")
+async def detect(file: UploadFile = File(...)) -> dict:
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Upload an image file.")
+    image_bytes = await file.read()
+    try:
+        return get_yunet().detect(image_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Detection failed: {exc}") from exc
+
+
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)) -> dict:
     if not file.content_type or not file.content_type.startswith("image/"):
@@ -210,7 +277,7 @@ async def predict(file: UploadFile = File(...)) -> dict:
 
     image_bytes = await file.read()
     try:
-        features, face_detected = get_extractor().extract(image_bytes)
+        features, face_detected, bbox = get_extractor().extract(image_bytes)
         bmi = predict_from_features(bundle, features)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Prediction failed: {exc}") from exc
@@ -218,6 +285,7 @@ async def predict(file: UploadFile = File(...)) -> dict:
     return {
         "predicted_bmi": round(bmi, 2),
         "face_detected": face_detected,
+        "bbox": bbox,
         "model_version": bundle.get("version", "unknown"),
         "warning": "Academic demo only. Not for medical or personal decisions.",
     }
@@ -231,78 +299,170 @@ def index() -> str:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FaceFinalML2 BMI Demo</title>
+  <title>FaceFinalML2 Webcam BMI Demo</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 18px; line-height: 1.5; }
-    h1 { margin-bottom: 4px; }
-    .muted { color: #666; }
-    .card { border: 1px solid #ddd; padding: 18px; border-radius: 10px; margin: 16px 0; }
-    button, input::file-selector-button { padding: 9px 12px; border: 1px solid #222; background: white; border-radius: 7px; cursor: pointer; }
-    video, canvas { width: 100%; max-width: 420px; border-radius: 8px; border: 1px solid #ddd; }
-    #result { font-size: 22px; font-weight: 700; }
-    .small { font-size: 13px; color: #666; }
+    :root { --ink:#111; --muted:#666; --line:#ddd; --accent:#1f6b45; --paper:#fffdf7; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; max-width: 860px; margin: 32px auto; padding: 0 18px; line-height: 1.45; color: var(--ink); background: #f3f1eb; }
+    h1 { margin: 0 0 6px; letter-spacing: -0.03em; }
+    .muted, .small { color: var(--muted); }
+    .small { font-size: 13px; }
+    .card { border: 1px solid var(--line); background: var(--paper); padding: 18px; border-radius: 12px; margin: 16px 0; }
+    button { padding: 10px 14px; border: 1px solid #222; background: white; border-radius: 8px; cursor: pointer; font-weight: 650; }
+    button.primary { background: var(--ink); color: white; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .stage { position: relative; width: min(100%, 720px); margin: 14px 0; background: #111; border-radius: 12px; overflow: hidden; border: 1px solid #222; }
+    video, canvas.overlay { display: block; width: 100%; height: auto; }
+    canvas.overlay { position: absolute; inset: 0; pointer-events: none; }
+    #result { font-size: clamp(30px, 6vw, 54px); font-weight: 800; letter-spacing: -0.05em; margin: 8px 0 0; }
+    #status { min-height: 20px; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .pill { font-size: 12px; color: var(--muted); border: 1px solid var(--line); padding: 4px 8px; border-radius: 999px; background: white; }
   </style>
 </head>
 <body>
-  <h1>FaceFinalML2 BMI Demo</h1>
-  <p class="muted">Upload a face image or use your webcam. Academic demo only.</p>
+  <h1>FaceFinalML2 Webcam BMI Demo</h1>
+  <p class="muted">Webcam-only demo. YuNet tracks the face box in real time; clicking calculate runs the heavier ArcFace + DINOv2 + ConvNeXt BMI model.</p>
 
   <div class="card">
-    <h2>Upload image</h2>
-    <input id="file" type="file" accept="image/*">
-    <button onclick="predictFile()">Predict BMI</button>
+    <div class="row">
+      <button onclick="startCam()">Start webcam</button>
+      <button id="calcBtn" class="primary" onclick="calculateBMI()">Calculate BMI</button>
+      <span id="trackerPill" class="pill">tracker idle</span>
+    </div>
+
+    <div class="stage">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay" class="overlay"></canvas>
+    </div>
+
+    <canvas id="capture" style="display:none"></canvas>
+    <div id="result">BMI --</div>
+    <p id="status" class="small">Start the webcam, center your face in the frame, then press calculate.</p>
   </div>
 
-  <div class="card">
-    <h2>Webcam</h2>
-    <p><button onclick="startCam()">Start webcam</button> <button onclick="captureAndPredict()">Capture and predict</button></p>
-    <video id="video" autoplay playsinline></video>
-    <canvas id="canvas" style="display:none"></canvas>
-  </div>
-
-  <div class="card">
-    <div id="result">No prediction yet.</div>
-    <p id="details" class="small"></p>
-  </div>
-
-  <p class="small">Privacy note: this local demo sends the selected image to the running API server only. Do not use for medical, employment, insurance, or personal decisions.</p>
+  <p class="small">Academic demo only. BMI prediction from face images is noisy, privacy-sensitive, and not for medical or personal decisions.</p>
 
 <script>
-async function sendBlob(blob, name='image.jpg') {
-  const form = new FormData();
-  form.append('file', blob, name);
-  document.getElementById('result').textContent = 'Predicting... first run may download/load models.';
-  document.getElementById('details').textContent = '';
-  const res = await fetch('/predict', { method: 'POST', body: form });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || 'Prediction failed');
-  document.getElementById('result').textContent = `Predicted BMI: ${data.predicted_bmi}`;
-  document.getElementById('details').textContent = `Face detected: ${data.face_detected}. ${data.warning}`;
-}
+let stream = null;
+let tracking = false;
+let busyDetect = false;
+let lastBox = null;
+let lastBMI = null;
+let lastFaceDetected = false;
 
-async function predictFile() {
-  try {
-    const f = document.getElementById('file').files[0];
-    if (!f) return alert('Choose an image first.');
-    await sendBlob(f, f.name);
-  } catch (e) { document.getElementById('result').textContent = e.message; }
-}
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const capture = document.getElementById('capture');
+const result = document.getElementById('result');
+const statusEl = document.getElementById('status');
+const trackerPill = document.getElementById('trackerPill');
+const calcBtn = document.getElementById('calcBtn');
 
 async function startCam() {
-  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-  document.getElementById('video').srcObject = stream;
+  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 1280, height: 720 }, audio: false });
+  video.srcObject = stream;
+  await video.play();
+  resizeOverlay();
+  tracking = true;
+  statusEl.textContent = 'Tracking face box. Press calculate when ready.';
+  requestAnimationFrame(drawLoop);
+  setInterval(trackFace, 220);
 }
 
-async function captureAndPredict() {
-  try {
-    const video = document.getElementById('video');
-    if (!video.videoWidth) return alert('Start webcam first.');
-    const canvas = document.getElementById('canvas');
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    canvas.toBlob(blob => sendBlob(blob, 'webcam.jpg').catch(e => document.getElementById('result').textContent = e.message), 'image/jpeg', 0.92);
-  } catch (e) { document.getElementById('result').textContent = e.message; }
+function resizeOverlay() {
+  if (!video.videoWidth) return;
+  overlay.width = video.videoWidth;
+  overlay.height = video.videoHeight;
 }
+
+function frameBlob(quality = 0.75) {
+  if (!video.videoWidth) throw new Error('Webcam is not ready.');
+  capture.width = video.videoWidth;
+  capture.height = video.videoHeight;
+  capture.getContext('2d').drawImage(video, 0, 0, capture.width, capture.height);
+  return new Promise(resolve => capture.toBlob(resolve, 'image/jpeg', quality));
+}
+
+async function trackFace() {
+  if (!tracking || busyDetect || !video.videoWidth) return;
+  busyDetect = true;
+  try {
+    const blob = await frameBlob(0.55);
+    const form = new FormData();
+    form.append('file', blob, 'frame.jpg');
+    const res = await fetch('/detect', { method: 'POST', body: form });
+    const data = await res.json();
+    if (res.ok && data.face_detected) {
+      lastBox = data.bbox;
+      trackerPill.textContent = 'face tracked';
+    } else {
+      lastBox = null;
+      trackerPill.textContent = 'no face box';
+    }
+  } catch (e) {
+    trackerPill.textContent = 'tracker error';
+  } finally {
+    busyDetect = false;
+  }
+}
+
+function drawLoop() {
+  resizeOverlay();
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+  if (lastBox) {
+    const {x, y, w, h} = lastBox;
+    ctx.lineWidth = Math.max(3, overlay.width / 240);
+    ctx.strokeStyle = '#00ff88';
+    ctx.strokeRect(x, y, w, h);
+
+    const label = lastBMI !== null ? `BMI ${lastBMI}` : 'face';
+    ctx.font = `${Math.max(20, overlay.width / 28)}px system-ui, sans-serif`;
+    const pad = 8;
+    const metrics = ctx.measureText(label);
+    const boxH = Math.max(32, overlay.width / 22);
+    const labelY = Math.max(0, y - boxH - 6);
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    ctx.fillRect(x, labelY, metrics.width + pad * 2, boxH);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, x + pad, labelY + boxH - 10);
+  }
+
+  requestAnimationFrame(drawLoop);
+}
+
+async function calculateBMI() {
+  try {
+    if (!video.videoWidth) return alert('Start webcam first.');
+    calcBtn.disabled = true;
+    calcBtn.textContent = 'Calculating...';
+    result.textContent = 'BMI ...';
+    statusEl.textContent = 'Running ArcFace + DINOv2 + ConvNeXt. This can take a few seconds on CPU.';
+
+    const blob = await frameBlob(0.92);
+    const form = new FormData();
+    form.append('file', blob, 'webcam.jpg');
+    const res = await fetch('/predict', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Prediction failed');
+
+    lastBMI = data.predicted_bmi;
+    lastFaceDetected = data.face_detected;
+    if (data.bbox) lastBox = data.bbox;
+    result.textContent = `BMI ${data.predicted_bmi}`;
+    statusEl.textContent = `ArcFace face detected: ${data.face_detected}. ${data.warning}`;
+  } catch (e) {
+    statusEl.textContent = e.message;
+    result.textContent = 'BMI --';
+  } finally {
+    calcBtn.disabled = false;
+    calcBtn.textContent = 'Calculate BMI';
+  }
+}
+
+window.addEventListener('resize', resizeOverlay);
 </script>
 </body>
 </html>

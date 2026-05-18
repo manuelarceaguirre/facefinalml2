@@ -4,8 +4,9 @@ This is the simplest functional API/demo for the final model family.
 
 ## What it serves
 
-- `GET /` browser demo with image upload and webcam capture.
-- `POST /predict` image upload endpoint.
+- `GET /` webcam-only browser demo.
+- `POST /detect` lightweight YuNet CPU face-box tracking endpoint.
+- `POST /predict` heavier BMI endpoint using ArcFace when available, plus DINOv2 and ConvNeXt.
 - `GET /health` model-bundle status.
 
 The API uses a private sklearn deployment bundle:
@@ -73,7 +74,9 @@ Open:
 http://localhost:8000
 ```
 
-## Call the endpoint
+The page is webcam-only: click **Start webcam**, center your face, then click **Calculate BMI**. The green box is tracked with YuNet for responsiveness; the BMI calculation uses the heavier model.
+
+## Call the BMI endpoint
 
 ```bash
 curl -X POST http://localhost:8000/predict \
@@ -86,6 +89,7 @@ Example response:
 {
   "predicted_bmi": 31.42,
   "face_detected": true,
+  "bbox": {"x": 140.0, "y": 80.0, "w": 180.0, "h": 180.0},
   "model_version": "facefinalml2_api_v1_arcface_dinov2_convnext_ridge",
   "warning": "Academic demo only. Not for medical or personal decisions."
 }
