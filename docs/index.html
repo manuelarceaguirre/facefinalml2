@@ -93,7 +93,7 @@
       <section class="hero">
         <div class="kicker">Machine Learning II final project · replication and extension</div>
         <h1>Beating Face-to-BMI with Pair-Safe Modern Embeddings</h1>
-        <p class="subtitle">A prose-first account of how I replicated the Face-to-BMI paper, made the evaluation leakage-safe, and improved the reported score with modern frozen embeddings.</p>
+        <p class="subtitle">A prose-first account of how we replicated the Face-to-BMI paper, made the evaluation leakage-safe, and improved the reported score with modern frozen embeddings.</p>
         <div class="byline"><span>Manuel Arce Aguirre</span><span>UChicago ML2 · Spring 2026</span><span>Final pair-safe test r = 0.7216</span></div>
       </section>
 
@@ -101,13 +101,13 @@
         <h2>Original Paper</h2>
         <p class="lead">The original Face-to-BMI paper asked whether a computer vision model could infer a person's body mass index from a face image.</p>
         <p>Kocabey et al. framed the problem as supervised regression. They collected face images with BMI labels, extracted visual features with pretrained convolutional networks, and trained a support vector regressor to predict BMI. The paper compared generic VGG-Net features with VGG-Face features, where VGG-Face was the stronger representation because it was pretrained specifically for faces.</p>
-        <p>The connection to my project is the evaluation. The paper reported Pearson correlation between true BMI and predicted BMI on a held-out test set. Their best reported overall result was <code>r = 0.65</code> with VGG-Face features and SVR. So the natural replication target is not just to build a BMI predictor, but to build one that exceeds that held-out correlation under a fair split.</p>
+        <p>The connection to our project is the evaluation. The paper reported Pearson correlation between true BMI and predicted BMI on a held-out test set. Their best reported overall result was <code>r = 0.65</code> with VGG-Face features and SVR. So the natural replication target is not just to build a BMI predictor, but to build one that exceeds that held-out correlation under a fair split.</p>
       </section>
 
       <section id="assignment">
         <h2>Assignment</h2>
         <p>The assignment was to replicate and extend the paper, then ship a simple real-time web API or demo. In plain English, “beat the paper” means that on examples the model did not train on, our predictions should linearly track true BMI better than the original paper's best model. Numerically, that means an overall Pearson correlation greater than <code>0.65</code>.</p>
-        <p>That definition matters because a model can look good for the wrong reason. The dataset appears to contain before/after pairs of the same person. If one image from a pair is in training and the other is in test, the model may learn identity-related features and appear more accurate than it really is. Therefore I treated beating the paper as a leakage-safe target: train, validation, and test should not share paired images from the same person.</p>
+        <p>That definition matters because a model can look good for the wrong reason. The dataset appears to contain before/after pairs of the same person. If one image from a pair is in training and the other is in test, the model may learn identity-related features and appear more accurate than it really is. Therefore we treated beating the paper as a leakage-safe target: train, validation, and test should not share paired images from the same person.</p>
       </section>
 
       <section id="data">
@@ -115,8 +115,8 @@
         <p>The dataset came from the course-provided <code>Copy of BMI.zip</code>. Inside the zip, the canonical metadata file was <code>BMI/Data/data.csv</code>. It contained columns for a row id, BMI, gender, an official training flag, and an image filename.</p>
         <pre><code>columns = ["unnamed:_0", "bmi", "gender", "is_training", "name"]
 image_path = BMI/Data/Images/&lt;name&gt;</code></pre>
-        <p>I used exact image mapping rather than fuzzy filename search. This is important because fuzzy image matching can silently attach the wrong image to the wrong label. After exact path verification, the final available-image subset contained 3,955 clean rows.</p>
-        <p>The main data decision was the pair-safe grouping rule. Adjacent rows appear to correspond to before/after images of the same person, so I grouped rows by integer division of the metadata row id:</p>
+        <p>We used exact image mapping rather than fuzzy filename search. This is important because fuzzy image matching can silently attach the wrong image to the wrong label. After exact path verification, the final available-image subset contained 3,955 clean rows.</p>
+        <p>The main data decision was the pair-safe grouping rule. Adjacent rows appear to correspond to before/after images of the same person, so we grouped rows by integer division of the metadata row id:</p>
         <pre><code>df["row_id"] = df["unnamed:_0"].astype(int)
 df["pair_id"] = df["row_id"] // 2</code></pre>
         <p>The final protocol used the provided <code>is_training</code> column for the official test split, then carved validation only out of the official training pool while keeping <code>pair_id</code> groups together. The final group-overlap audit was zero for train/validation, train/test, and validation/test.</p>
@@ -125,8 +125,8 @@ df["pair_id"] = df["row_id"] // 2</code></pre>
       <section id="intuition">
         <h2>Model Intuition</h2>
         <p>The strongest clue from the original paper is that face-specialized features beat generic image features. VGG-Face worked better than VGG-Net because it was trained to represent faces. The modern version of that idea is ArcFace, a face-recognition embedding trained to separate identities in a highly discriminative feature space.</p>
-        <p>However, BMI from a face image is not purely an identity-recognition problem. Generic visual cues can still matter: pose, face shape, texture, lighting, and other visual patterns. For that reason I combined ArcFace with two modern general-purpose image representations: DINOv2 and ConvNeXt.</p>
-        <p>The intuition is that the three representations are complementary. ArcFace contributes face-geometry and identity-sensitive structure. DINOv2 contributes self-supervised semantic and shape information. ConvNeXt contributes strong supervised image features. Because the dataset has only a few thousand images, I avoided full end-to-end fine-tuning and instead used frozen embeddings with regularized regressors.</p>
+        <p>However, BMI from a face image is not purely an identity-recognition problem. Generic visual cues can still matter: pose, face shape, texture, lighting, and other visual patterns. For that reason we combined ArcFace with two modern general-purpose image representations: DINOv2 and ConvNeXt.</p>
+        <p>The intuition is that the three representations are complementary. ArcFace contributes face-geometry and identity-sensitive structure. DINOv2 contributes self-supervised semantic and shape information. ConvNeXt contributes strong supervised image features. Because the dataset has only a few thousand images, we avoided full end-to-end fine-tuning and instead used frozen embeddings with regularized regressors.</p>
         <img class="pipeline-diagram" src="assets/diagram.png" alt="Pipeline diagram showing a face image split into ArcFace, DINOv2, and ConvNeXt frozen feature extractors, concatenated into a fused feature vector and passed into a regressor to output predicted BMI." />
       </section>
 
@@ -134,7 +134,7 @@ df["pair_id"] = df["row_id"] // 2</code></pre>
         <h2>Training</h2>
         <p>The training code is intentionally closer to a classical machine-learning pipeline than a fine-tuning script. The heavy networks are used as frozen feature extractors, and the only learned component is a lightweight regressor on top of their embeddings. This made the experiment faster, easier to audit, and less likely to overfit a dataset with only a few thousand labeled images.</p>
 
-        <p>The first important code block is the split. The metadata gives an official <code>is_training</code> flag, but I still needed to protect against before/after pair leakage. I treated adjacent metadata rows as the same person-level group and made sure no group crossed train, validation, and test.</p>
+        <p>The first important code block is the split. The metadata gives an official <code>is_training</code> flag, but we still needed to protect against before/after pair leakage. We treated adjacent metadata rows as the same person-level group and made sure no group crossed train, validation, and test.</p>
         <pre><code>def make_pair_safe_split(df):
     df = df.copy()
 
@@ -215,7 +215,7 @@ model.fit(X_fused[train_mask], y[train_mask])
 val_pred  = model.predict(X_fused[val_mask])
 test_pred = model.predict(X_fused[test_mask])</code></pre>
 
-        <p>I also trained two variants that are useful for tabular-style regression on frozen embeddings. The first transforms the target distribution before Ridge regression. The second compresses the feature vector with PCA before an RBF-kernel SVR.</p>
+        <p>We also trained two variants that are useful for tabular-style regression on frozen embeddings. The first transforms the target distribution before Ridge regression. The second compresses the feature vector with PCA before an RBF-kernel SVR.</p>
         <pre><code>def quantile_ridge_model(n_train):
     return TransformedTargetRegressor(
         regressor=ridge_model(),
@@ -234,7 +234,7 @@ def pca_svr_model(n_features):
         SVR(kernel="rbf", C=10.0, epsilon=0.3, gamma="scale"),
     )</code></pre>
 
-        <p>The ensemble was deliberately selected on validation predictions only. This is the part that prevents the test set from becoming a tuning set. I ranked candidate models by validation correlation, removed near-duplicate predictions, then optimized nonnegative weights with a cap so no single component could dominate too aggressively.</p>
+        <p>The ensemble was deliberately selected on validation predictions only. This is the part that prevents the test set from becoming a tuning set. We ranked candidate models by validation correlation, removed near-duplicate predictions, then optimized nonnegative weights with a cap so no single component could dominate too aggressively.</p>
         <pre><code>def validation_objective(weights, P_val, y_val):
     weights = np.maximum(weights, 0)
     weights = weights / (weights.sum() + 1e-12)
@@ -258,7 +258,7 @@ weights = weights / weights.sum()
 
 test_pred = test_predictions[selected] @ weights</code></pre>
 
-        <p>Finally, every model and ensemble was evaluated with the same metric function. Pearson correlation was the primary paper-comparison metric, but I also tracked Spearman correlation, MAE, RMSE, R², bias, and tolerance bands so the report would not rely on a single number.</p>
+        <p>Finally, every model and ensemble was evaluated with the same metric function. Pearson correlation was the primary paper-comparison metric, but we also tracked Spearman correlation, MAE, RMSE, R², bias, and tolerance bands so the report would not rely on a single number.</p>
         <pre><code>def regression_metrics(y_true, y_pred):
     return {
         "pearson_r": pearsonr(y_true, y_pred)[0],
@@ -274,7 +274,7 @@ test_pred = test_predictions[selected] @ weights</code></pre>
 
       <section id="results">
         <h2>Results</h2>
-        <p>The first exploratory run nearly matched the paper, but I did not treat it as final because the split was not pair-safe. Once I repaired the evaluation, the generic embedding baseline reached <code>r = 0.639</code>, slightly below the paper's <code>0.65</code>. This was a useful checkpoint: the stricter protocol made the problem harder.</p>
+        <p>The first exploratory run nearly matched the paper, but we did not treat it as final because the split was not pair-safe. Once we repaired the evaluation, the generic embedding baseline reached <code>r = 0.639</code>, slightly below the paper's <code>0.65</code>. This was a useful checkpoint: the stricter protocol made the problem harder.</p>
         <p>The decisive improvement came from adding ArcFace. ArcFace alone was close to the paper target, and ArcFace fused with DINOv2 and ConvNeXt clearly exceeded it. The best simple single model reached <code>r = 0.7104</code>. The best validation-selected ensemble reached <code>r = 0.7216</code>.</p>
         <p>The final result is therefore: on the official available-image, pair-safe split, the ArcFace + DINOv2 + ConvNeXt ensemble beat the original VGG-Face + SVR paper baseline. The improvement also held across gender subgroups, with female <code>r = 0.718</code> and male <code>r = 0.727</code>.</p>
       </section>
