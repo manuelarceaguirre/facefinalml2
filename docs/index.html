@@ -286,11 +286,13 @@ test_pred = test_predictions[selected] @ weights</code></pre>
       <section id="demo">
         <h2>Demo/API</h2>
         <p>The final deliverable includes a minimal webcam-only API. A lightweight YuNet face detector tracks face boxes in real time, while the heavier ArcFace + DINOv2 + ConvNeXt BMI model runs only when the user presses the calculate button. This keeps the interface responsive while still using the stronger model for the actual prediction.</p>
+        <p>The demo supports multiple people on screen at once. YuNet continuously tracks up to six faces in the webcam stream, and the browser maintains stable track IDs so the colored boxes do not swap identities when people move. When the user presses calculate, the backend runs the BMI model on each detected face and sends the predictions back to the live overlay.</p>
+        <p>We also added an optional local face-recognition layer for the demo. A user can type a name, press capture, and save a clear webcam frame as an ArcFace embedding in <code>models/known_faces.joblib</code>. Later, when the same person appears in the webcam, the API compares the new ArcFace embedding against the saved embeddings with cosine similarity. If the match passes the threshold, the overlay shows the person's name next to their predicted BMI instead of a generic label such as <code>P1</code>.</p>
         <img class="pipeline-diagram" src="assets/demo_screenshot.png" alt="Screenshot of the webcam BMI demo showing live face boxes and BMI predictions over the video stream." />
         <pre><code>GET  /              # webcam demo
-POST /detect        # lightweight YuNet face boxes
+POST /detect        # lightweight YuNet face boxes for up to six people
 POST /predict_multi # BMI predictions for up to six people
-POST /enroll        # optional local face-name enrollment</code></pre>
+POST /enroll        # local ArcFace name enrollment for later recognition</code></pre>
       </section>
 
       <section id="limitations">
