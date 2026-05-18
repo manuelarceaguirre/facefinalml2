@@ -5,15 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Face-to-BMI Replication: Beating the Paper with Pair-Safe Modern Embeddings</title>
   <meta name="description" content="Prose-first technical blog for a Face-to-BMI replication and extension." />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
+    @font-face {
+      font-family: "KaTeX Main";
+      src: url("https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/KaTeX_Main-Regular.woff2") format("woff2");
+      font-weight: 400;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: "KaTeX Main";
+      src: url("https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/KaTeX_Main-Bold.woff2") format("woff2");
+      font-weight: 700;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: "KaTeX Main";
+      src: url("https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/KaTeX_Main-Italic.woff2") format("woff2");
+      font-weight: 400;
+      font-style: italic;
+    }
+    @font-face {
+      font-family: "KaTeX Typewriter";
+      src: url("https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/KaTeX_Typewriter-Regular.woff2") format("woff2");
+      font-weight: 400;
+      font-style: normal;
+    }
     :root {
       --paper:#fffdf7; --surround:#efede7; --ink:#111; --muted:#69635a;
       --hairline:#d8d0c4; --rule:#1b1b1b;
-      --font-serif:"Crimson Pro", Georgia, serif;
-      --font-mono:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --font-serif:"KaTeX Main", "Latin Modern Roman", "Computer Modern Serif", Georgia, serif;
+      --font-mono:"KaTeX Typewriter", "Latin Modern Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       --max:1120px;
     }
     * { box-sizing:border-box; }
