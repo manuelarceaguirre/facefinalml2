@@ -17,6 +17,11 @@ Fast-start Colab notebook:
 
 - [`notebooks/facefinalml2_colab_runner.ipynb`](notebooks/facefinalml2_colab_runner.ipynb)
 
+Minimal API/demo:
+
+- [`api.py`](api.py)
+- [`API.md`](API.md)
+
 The Colab notebook is intentionally a single-cell runner: it clones/pulls this repo, downloads the Google Drive BMI zip, audits the data, creates leakage-free splits, extracts frozen FaceNet/VGGFace2 + ConvNeXt + optional DINOv2 embeddings, trains regularized regressors, evaluates an ensemble, and writes metrics under `outputs/metrics/`.
 
 ## Reference paper baseline
@@ -94,7 +99,7 @@ The intended workflow is:
 
 ## Deliverables checklist
 
-- [ ] Real-time BMI prediction API or Streamlit demo
+- [x] Real-time BMI prediction API or Streamlit demo
 - [ ] Trained/fine-tuned model and saved inference artifact
 - [ ] Evaluation table comparing against paper baseline
 - [ ] 10-page implementation write-up

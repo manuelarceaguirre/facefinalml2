@@ -11,6 +11,8 @@ pillow
 tqdm
 opencv-python-headless
 facenet-pytorch
+insightface
+onnxruntime
 timm
 transformers
 accelerate
