@@ -485,7 +485,9 @@ function drawLoop() {
   const ctx = overlay.getContext('2d');
   ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-  const drawFaces = predictions.length ? predictions : faces;
+  // Keep tracking live boxes after BMI calculation. Predictions only provide
+  // labels; YuNet continues to provide the current moving face boxes.
+  const drawFaces = faces.length ? faces : predictions;
   drawFaces.slice(0, 6).forEach((row, i) => {
     const b = row.bbox || (row.bbox === null ? null : row.bbox);
     if (!b) return;
