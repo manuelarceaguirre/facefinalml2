@@ -427,7 +427,8 @@ def index() -> str:
     button.primary { background: var(--ink); color: white; }
     button:disabled { opacity: .55; cursor: wait; }
     .stage { position: relative; width: min(100%, 760px); margin: 14px 0; background: #111; border-radius: 12px; overflow: hidden; border: 1px solid #222; }
-    video, canvas.overlay { display: block; width: 100%; height: auto; transform: scaleX(-1); }
+    video, canvas.overlay { display: block; width: 100%; height: auto; }
+    video { transform: scaleX(-1); }
     canvas.overlay { position: absolute; inset: 0; pointer-events: none; }
     #result { font-size: clamp(24px, 5vw, 46px); font-weight: 800; letter-spacing: -0.05em; margin: 8px 0 0; }
     #status { min-height: 20px; }
@@ -550,19 +551,23 @@ function drawLoop() {
     const who = nameForPerson(id);
     const label = bmi !== null ? `${who} BMI ${bmi}` : who;
 
+    // Video is mirrored for selfie UX, but the server returns coordinates in
+    // unmirrored image space. Mirror only x-coordinates, not text.
+    const mx = overlay.width - b.x - b.w;
     ctx.lineWidth = Math.max(3, overlay.width / 240);
     ctx.strokeStyle = color;
-    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    ctx.strokeRect(mx, b.y, b.w, b.h);
 
     ctx.font = `${Math.max(18, overlay.width / 34)}px system-ui, sans-serif`;
     const pad = 8;
     const metrics = ctx.measureText(label);
     const boxH = Math.max(30, overlay.width / 26);
     const labelY = Math.max(0, b.y - boxH - 6);
+    const labelX = Math.max(0, Math.min(overlay.width - metrics.width - pad * 2, mx));
     ctx.fillStyle = 'rgba(0,0,0,0.78)';
-    ctx.fillRect(b.x, labelY, metrics.width + pad * 2, boxH);
+    ctx.fillRect(labelX, labelY, metrics.width + pad * 2, boxH);
     ctx.fillStyle = color;
-    ctx.fillText(label, b.x + pad, labelY + boxH - 9);
+    ctx.fillText(label, labelX + pad, labelY + boxH - 9);
   });
 
   requestAnimationFrame(drawLoop);
