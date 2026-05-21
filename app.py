@@ -689,106 +689,98 @@ def main() -> None:
     if "active_image_signature" not in st.session_state:
         st.session_state.active_image_signature = None
 
-    left, right = st.columns([1.05, 0.95], gap="large")
+    render_panel_start(
+        "Live Webcam",
+        "This is the primary demo path: live webcam tracking, up to six people, optional name enrollment, and BMI labels over the video. Upload is only a fallback below.",
+    )
+    render_live_webcam(predictor.api_url)
 
-    with left:
-        render_panel_start(
-            "Live Webcam",
-            "This is the primary demo path: live webcam tracking, up to six people, optional name enrollment, and BMI labels over the video. Upload is only a fallback below.",
-        )
-        render_live_webcam(predictor.api_url)
+    st.markdown('<div class="fallback-heading">Fallback single-image predictor</div>', unsafe_allow_html=True)
+    with st.expander("Open upload / camera snapshot / demo samples fallback", expanded=False):
+        upload_tab, webcam_tab, sample_tab = st.tabs(["Webcam Snapshot", "Upload", "Demo Samples"])
 
-        st.markdown('<div class="fallback-heading">Fallback single-image predictor</div>', unsafe_allow_html=True)
-        with st.expander("Open upload / camera snapshot / demo samples fallback", expanded=False):
-            upload_tab, webcam_tab, sample_tab = st.tabs(["Webcam Snapshot", "Upload", "Demo Samples"])
+        uploaded_file = None
+        camera_file = None
+        selected_sample: tuple[str, Path] | None = None
 
-            uploaded_file = None
-            camera_file = None
-            selected_sample: tuple[str, Path] | None = None
+        with webcam_tab:
+            camera_file = st.camera_input("Capture one face image")
+            st.caption("This is a fallback still-image path. Use the live webcam panel above for the final demo.")
 
-            with webcam_tab:
-                camera_file = st.camera_input("Capture one face image")
-                st.caption("This is a fallback still-image path. Use the live webcam panel above for the final demo.")
+        with upload_tab:
+            uploaded_file = st.file_uploader(
+                "Choose a face image",
+                type=["jpg", "jpeg", "png", "bmp"],
+                accept_multiple_files=False,
+            )
+            st.caption("Supported formats: JPG, PNG, BMP.")
 
-            with upload_tab:
-                uploaded_file = st.file_uploader(
-                    "Choose a face image",
-                    type=["jpg", "jpeg", "png", "bmp"],
-                    accept_multiple_files=False,
+        with sample_tab:
+            st.caption("Use these backup samples if webcam access is unavailable during the live demo.")
+            sample_columns = st.columns(3, gap="small")
+            for index, ((label, sample_path), column) in enumerate(zip(DEMO_SAMPLES, sample_columns)):
+                with column:
+                    if sample_path.exists():
+                        st.image(str(sample_path), caption=label, width="stretch")
+                        if st.button(f"Use {label}", key=f"use_demo_sample_{index}"):
+                            selected_sample = (label, sample_path)
+                    else:
+                        st.warning(f"{label} missing")
+
+        selected_file = camera_file or uploaded_file
+        source_label = "Webcam snapshot" if camera_file is not None else "Uploaded image"
+
+        if selected_sample is not None:
+            try:
+                sample_label, sample_path = selected_sample
+                image = load_sample_image(sample_path)
+                set_active_image(
+                    image=image,
+                    source=f"Demo sample: {sample_label}",
+                    signature=get_sample_signature(sample_path),
                 )
-                st.caption("Supported formats: JPG, PNG, BMP.")
-
-            with sample_tab:
-                st.caption("Use these backup samples if webcam access is unavailable during the live demo.")
-                sample_columns = st.columns(3, gap="small")
-                for index, ((label, sample_path), column) in enumerate(zip(DEMO_SAMPLES, sample_columns)):
-                    with column:
-                        if sample_path.exists():
-                            st.image(str(sample_path), caption=label, width="stretch")
-                            if st.button(f"Use {label}", key=f"use_demo_sample_{index}"):
-                                selected_sample = (label, sample_path)
-                        else:
-                            st.warning(f"{label} missing")
-
-            selected_file = camera_file or uploaded_file
-            source_label = "Webcam snapshot" if camera_file is not None else "Uploaded image"
-
-            if selected_sample is not None:
-                try:
-                    sample_label, sample_path = selected_sample
-                    image = load_sample_image(sample_path)
-                    set_active_image(
-                        image=image,
-                        source=f"Demo sample: {sample_label}",
-                        signature=get_sample_signature(sample_path),
-                    )
-                except PredictionError as exc:
-                    clear_active_input()
-                    st.error(str(exc))
-            elif selected_file is not None:
-                try:
-                    signature = get_file_signature(selected_file)
-                    image = decode_image(selected_file)
-                    set_active_image(image=image, source=source_label, signature=signature)
-                except PredictionError as exc:
-                    clear_active_input()
-                    st.error(str(exc))
-            elif not str(st.session_state.active_image_signature).startswith("sample:"):
+            except PredictionError as exc:
                 clear_active_input()
+                st.error(str(exc))
+        elif selected_file is not None:
+            try:
+                signature = get_file_signature(selected_file)
+                image = decode_image(selected_file)
+                set_active_image(image=image, source=source_label, signature=signature)
+            except PredictionError as exc:
+                clear_active_input()
+                st.error(str(exc))
+        elif not str(st.session_state.active_image_signature).startswith("sample:"):
+            clear_active_input()
 
-            if st.session_state.active_image is not None:
-                st.image(
-                    st.session_state.active_image,
-                    caption=st.session_state.active_source,
-                    width="stretch",
-                )
+        if st.session_state.active_image is not None:
+            st.image(
+                st.session_state.active_image,
+                caption=st.session_state.active_source,
+                width="stretch",
+            )
+        else:
+            st.info("No fallback image selected yet.")
+
+        predict_clicked = st.button("Predict fallback image BMI", type="primary")
+        if predict_clicked:
+            image = st.session_state.get("active_image")
+            if image is None:
+                st.warning("Please capture, upload, or select an image before predicting.")
             else:
-                st.info("No fallback image selected yet.")
+                try:
+                    with st.spinner("Running BMI prediction..."):
+                        st.session_state.prediction = predict_bmi(image, predictor)
+                    st.success("Prediction ready.")
+                except PredictorUnavailableError as exc:
+                    st.error(str(exc))
+                except PredictionError as exc:
+                    st.error(str(exc))
+                except Exception as exc:  # Defensive UI boundary for live demos.
+                    st.error(f"Prediction failed unexpectedly: {exc}")
 
-            predict_clicked = st.button("Predict fallback image BMI", type="primary")
-            if predict_clicked:
-                image = st.session_state.get("active_image")
-                if image is None:
-                    st.warning("Please capture, upload, or select an image before predicting.")
-                else:
-                    try:
-                        with st.spinner("Running BMI prediction..."):
-                            st.session_state.prediction = predict_bmi(image, predictor)
-                        st.success("Prediction ready.")
-                    except PredictorUnavailableError as exc:
-                        st.error(str(exc))
-                    except PredictionError as exc:
-                        st.error(str(exc))
-                    except Exception as exc:  # Defensive UI boundary for live demos.
-                        st.error(f"Prediction failed unexpectedly: {exc}")
-
-    with right:
-        render_panel_start(
-            "Fallback Result",
-            "This panel shows results only for the optional still-image fallback. The main live webcam result appears inside the embedded demo on the left.",
-        )
-        st.write("")
-        render_prediction()
+    st.write("")
+    render_prediction()
 
     st.write("")
     bottom_left, bottom_right = st.columns([1.1, 0.9], gap="large")
