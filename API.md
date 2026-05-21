@@ -5,6 +5,7 @@ This is the simplest functional API/demo for the final model family.
 ## What it serves
 
 - `GET /` webcam-only browser demo.
+- `app.py` optional Streamlit frontend that calls this live API.
 - `POST /detect` lightweight YuNet CPU face-box tracking endpoint for up to 6 faces.
 - `POST /predict_multi` heavier BMI endpoint for up to 6 people using ArcFace when available, plus DINOv2 and ConvNeXt.
 - `POST /predict` backwards-compatible single-person BMI endpoint.
@@ -69,13 +70,21 @@ pip install -r requirements.txt
 uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-Open:
+Open the built-in FastAPI page:
 
 ```text
 http://localhost:8000
 ```
 
 The page is webcam-only: click **Start webcam**, get up to six people in frame, then click **Calculate BMI for everyone**. Colored boxes are tracked with YuNet for responsiveness; the BMI calculation uses the heavier model.
+
+Or run the Streamlit frontend adapted from the uploaded demo skeleton:
+
+```bash
+streamlit run app.py
+```
+
+The Streamlit frontend supports upload, webcam capture, demo samples, BMI result display, model summary, and paper reference. It calls `POST /predict` through `predictor.py`. Set `FACEBMI_API_URL` if the API is not running at `http://localhost:8000`.
 
 ## Call the multi-person BMI endpoint
 

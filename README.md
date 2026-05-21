@@ -20,6 +20,8 @@ Fast-start Colab notebook:
 Minimal API/demo:
 
 - [`api.py`](api.py)
+- [`app.py`](app.py) Streamlit frontend for the live API
+- [`predictor.py`](predictor.py) Streamlit-to-FastAPI adapter
 - [`API.md`](API.md)
 
 The Colab notebook is intentionally a single-cell runner: it clones/pulls this repo, downloads the Google Drive BMI zip, audits the data, creates leakage-free splits, extracts frozen FaceNet/VGGFace2 + ConvNeXt + optional DINOv2 embeddings, trains regularized regressors, evaluates an ensemble, and writes metrics under `outputs/metrics/`.
@@ -50,8 +52,8 @@ Our primary benchmark target is therefore **overall Pearson r > 0.65** on a held
    - RMSE
    - gender-stratified metrics if metadata permits
 7. Deploy a simple prediction interface:
-   - FastAPI REST endpoint and/or Streamlit demo
-   - optional webcam/image upload input
+   - FastAPI REST endpoint
+   - Streamlit UI with upload, webcam capture, demo samples, BMI result display, model summary, and paper reference
 8. Prepare the final write-up and 10-minute presentation/demo.
 
 ## Data
@@ -80,7 +82,11 @@ data/
 ```text
 facefinalml2/
   README.md              Project overview and instructions
-  requirements.txt       Python dependencies for Colab/API work
+  requirements.txt       Python dependencies for Colab/API/Streamlit work
+  api.py                 FastAPI model server
+  app.py                 Streamlit frontend
+  predictor.py           Adapter that calls the live API from Streamlit
+  demo_samples/          Backup images for live presentation fallback
   notebooks/             Colab notebooks will go here
   report/                Final write-up sources/figures will go here
   models/                Trained model artifacts, ignored by git
@@ -96,6 +102,28 @@ The intended workflow is:
 3. Install dependencies from `requirements.txt`.
 4. Run preprocessing, training, evaluation, and export a model artifact.
 5. Push notebook updates and final documentation back to GitHub.
+
+## Run the Streamlit frontend against the live API
+
+Terminal 1:
+
+```bash
+cd final/facefinalml2
+uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+Terminal 2:
+
+```bash
+cd final/facefinalml2
+streamlit run app.py
+```
+
+If the API is hosted somewhere else, point the frontend at it:
+
+```bash
+FACEBMI_API_URL="https://your-api-host" streamlit run app.py
+```
 
 ## Deliverables checklist
 
