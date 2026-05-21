@@ -331,6 +331,10 @@ class FeatureExtractor:
             "arcface_dinov2_convnext": np.concatenate([arcface, dinov2, convnext]),
         }
 
+    def detect_arcface_many(self, image_bytes: bytes, max_faces: int = 6) -> list[dict]:
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        return self._detect_faces(image, max_faces=max_faces)
+
     def extract_many(self, image_bytes: bytes, max_faces: int = 6) -> list[Tuple[Dict[str, np.ndarray], bool, Optional[dict]]]:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         detected = self._detect_faces(image, max_faces=max_faces)
@@ -399,6 +403,29 @@ async def detect(file: UploadFile = File(...)) -> dict:
         return get_yunet().detect(image_bytes, max_faces=6)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Detection failed: {exc}") from exc
+
+
+@app.post("/recognize_multi")
+async def recognize_multi(file: UploadFile = File(...)) -> dict:
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Upload an image file.")
+    image_bytes = await file.read()
+    try:
+        detected = get_extractor().detect_arcface_many(image_bytes, max_faces=6)
+        people = []
+        for idx, row in enumerate(detected, start=1):
+            identity = recognize_face(row.get("arcface"))
+            people.append({
+                "person_id": idx,
+                "name": identity["name"],
+                "recognized": identity["recognized"],
+                "similarity": identity["similarity"],
+                "face_detected": bool(row.get("face_detected")),
+                "bbox": row.get("bbox"),
+            })
+        return {"people": people, "count": len(people), "known_faces_loaded": KNOWN_FACES_PATH.exists()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Recognition failed: {exc}") from exc
 
 
 @app.post("/enroll")
@@ -509,7 +536,7 @@ def index() -> str:
 </head>
 <body>
   <h1>FaceFinalML2 Webcam BMI Demo</h1>
-  <p class="muted">Webcam-only demo. YuNet tracks up to six face boxes in real time; clicking calculate runs the heavier ArcFace + DINOv2 + ConvNeXt BMI model for each detected person.</p>
+  <p class="muted">Webcam-only demo. YuNet tracks up to six face boxes in real time, while ArcFace periodically recognizes enrolled people. The BMI button only runs the heavier BMI regressor.</p>
 
   <div class="card">
     <div class="row">
@@ -538,7 +565,9 @@ let tracking = false;
 let busyDetect = false;
 let tracks = [];
 let predictions = [];
+let recognitions = [];
 let nextTrackId = 1;
+let busyRecognize = false;
 
 const colors = ['#00ff88', '#00c2ff', '#ffcc00', '#ff5c8a', '#b26cff', '#ff7a00'];
 const video = document.getElementById('video');
@@ -558,9 +587,10 @@ async function startCam() {
   await video.play();
   resizeOverlay();
   tracking = true;
-  statusEl.textContent = 'Tracking up to six faces. Press calculate when ready.';
+  statusEl.textContent = 'Tracking faces and looking for enrolled identities. Press BMI when ready.';
   requestAnimationFrame(drawLoop);
   setInterval(trackFaces, 220);
+  setInterval(recognizeFaces, 1800);
 }
 
 function resizeOverlay() {
@@ -678,6 +708,29 @@ function predictionForTrack(trackId) {
   return predictions.find(x => x.track_id === trackId);
 }
 
+function recognitionForTrack(trackId) {
+  return recognitions.find(x => x.track_id === trackId);
+}
+
+async function recognizeFaces() {
+  if (!tracking || busyRecognize || !video.videoWidth || !tracks.length) return;
+  busyRecognize = true;
+  try {
+    const blob = await frameBlob(0.72);
+    const form = new FormData();
+    form.append('file', blob, 'recognize.jpg');
+    const res = await fetch('/recognize_multi', { method: 'POST', body: form });
+    const data = await res.json();
+    if (res.ok) {
+      recognitions = matchPredictionsToTracks(data.people || []);
+    }
+  } catch (e) {
+    // Recognition is opportunistic; tracking and BMI prediction should keep working.
+  } finally {
+    busyRecognize = false;
+  }
+}
+
 function drawLoop() {
   resizeOverlay();
   const ctx = overlay.getContext('2d');
@@ -688,10 +741,11 @@ function drawLoop() {
     const b = row.bbox;
     if (!b) return;
     const trackId = row.track_id || row.person_id || (i + 1);
-    const pred = predictionForTrack(trackId) || row;
+    const pred = predictionForTrack(trackId);
+    const rec = recognitionForTrack(trackId);
     const color = colors[(trackId - 1) % colors.length];
-    const who = pred.name || `P${trackId}`;
-    const label = pred.predicted_bmi !== undefined && pred.predicted_bmi !== null ? `${who} BMI ${pred.predicted_bmi}` : who;
+    const who = (pred && pred.name) || (rec && rec.name) || `P${trackId}`;
+    const label = pred && pred.predicted_bmi !== undefined && pred.predicted_bmi !== null ? `${who} BMI ${pred.predicted_bmi}` : who;
 
     // Video is mirrored for selfie UX, but the server returns coordinates in
     // unmirrored image space. Mirror only x-coordinates, not text.
@@ -744,7 +798,8 @@ async function enrollCurrentFace() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Enrollment failed');
     predictions = [];
-    statusEl.textContent = `Saved ${data.name} for recognition (${data.n_images} sample${data.n_images === 1 ? '' : 's'}). Now press Calculate BMI.`;
+    recognitions = [];
+    statusEl.textContent = `Saved ${data.name} for recognition (${data.n_images} sample${data.n_images === 1 ? '' : 's'}). The live tracker will now look for this person automatically.`;
   } catch (e) {
     statusEl.textContent = e.message;
   } finally {
@@ -757,7 +812,7 @@ async function calculateBMI() {
   try {
     if (!video.videoWidth) return alert('Start webcam first.');
     calcBtn.disabled = true;
-    calcBtn.textContent = 'Calculating...';
+    calcBtn.textContent = 'Calculating BMI...';
     result.textContent = 'BMI ...';
     peopleEl.innerHTML = '';
     predictions = [];
