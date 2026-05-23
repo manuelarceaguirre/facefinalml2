@@ -12,6 +12,7 @@ Project page / technical blog:
 
 See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full technical plan.
 See [`RESULTS.md`](RESULTS.md) and [`HANDOFF.md`](HANDOFF.md) for final metrics and handoff notes.
+See [`BACKEND_STREAMLIT_INTEGRATION.md`](BACKEND_STREAMLIT_INTEGRATION.md) for backend/frontend integration and run instructions.
 
 Fast-start Colab notebook:
 
